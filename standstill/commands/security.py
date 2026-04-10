@@ -9,12 +9,14 @@ import typer
 import yaml
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 import standstill.config as _config
 from standstill import state as _state
 from standstill.aws import security_services as sec_api
 from standstill.display import renderer
-from standstill.models.security_config import load_config
+from standstill.models.security_config import SecurityServicesConfig, load_config
 
 app = typer.Typer(no_args_is_help=True, help="Manage delegated security services across the org.")
 err = Console(stderr=True)
@@ -38,12 +40,19 @@ def init(
         Path,
         typer.Option("--output", "-o", help="Path for the generated config file."),
     ] = _DEFAULT_FILE,
+    file: Annotated[
+        Optional[Path],
+        typer.Option("--file", "-f", help="Existing config file to use as defaults."),
+    ] = None,
 ) -> None:
     """
     Interactively generate a security services configuration file.
 
     Walks through each service with cost notes so you can make informed
     decisions before committing to any spend.
+
+    If an existing config file is found (via --file or the default location),
+    its values are used as defaults and you can choose which services to reconfigure.
     """
     console = renderer.console
 
@@ -56,13 +65,32 @@ def init(
     ))
     console.print()
 
+    # ── Load existing config ─────────────────────────────────────────────────
+    existing: SecurityServicesConfig | None = None
+    existing_raw: dict = {}
+    input_path = file or (_DEFAULT_FILE if _DEFAULT_FILE.exists() else None)
+    if input_path:
+        try:
+            existing = load_config(input_path)
+            existing_raw = yaml.safe_load(input_path.read_text()) or {}
+            console.print(
+                f"[dim]Loaded existing config from [cyan]{input_path}[/cyan] — "
+                "existing values shown as defaults.[/dim]\n"
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            if file:
+                err.print(f"[bold red]Error:[/bold red] {exc}")
+                raise typer.Exit(1)
+
     # ── Delegated admin account ─────────────────────────────────────────────
     console.print("[bold cyan]Delegated Administrator Account[/bold cyan]")
     console.print(
         "[dim]All security services will be managed from this account.\n"
         "It should be a dedicated security tooling account, not the management account.[/dim]"
     )
-    _stored_admin = _config.get_delegated_admin()
+    _stored_admin = (
+        existing.delegated_admin_account if existing else None
+    ) or _config.get_delegated_admin()
     while True:
         delegated_admin = typer.prompt(
             "\nDelegated admin account ID",
@@ -72,141 +100,187 @@ def init(
             break
         err.print("[bold red]Invalid account ID.[/bold red] Expected 12 digits.")
 
-    cfg: dict = {"version": "1", "delegated_admin_account": delegated_admin, "services": {}}
+    # ── Service selection ────────────────────────────────────────────────────
+    console.print("\n[bold cyan]Services to Configure[/bold cyan]")
+    if existing:
+        console.print("[dim]Select which services to reconfigure. Others keep their current settings.[/dim]")
+    else:
+        console.print("[dim]Select which services to configure.[/dim]")
+
+    configure_gd  = typer.confirm("  Configure GuardDuty?",       default=True)
+    configure_sh  = typer.confirm("  Configure Security Hub?",     default=True)
+    configure_mc  = typer.confirm("  Configure Macie?",            default=True)
+    configure_ins = typer.confirm("  Configure Inspector?",        default=True)
+    configure_aa  = typer.confirm("  Configure Access Analyzer?",  default=True)
+
+    # ── Start from existing raw config or blank ──────────────────────────────
+    cfg: dict = dict(existing_raw) if existing_raw else {"version": "1", "services": {}}
+    cfg["delegated_admin_account"] = delegated_admin
+    if "services" not in cfg:
+        cfg["services"] = {}
     services = cfg["services"]
 
     # ── GuardDuty ────────────────────────────────────────────────────────────
-    console.print("\n[bold cyan]GuardDuty[/bold cyan]")
-    console.print("[dim]Threat detection across all org accounts.[/dim]")
-    gd_enabled = typer.confirm("Enable GuardDuty?", default=True)
-    services["guardduty"] = {"enabled": gd_enabled}
-    if gd_enabled:
-        console.print(
-            "[dim]Finding publishing frequency: SIX_HOURS is sufficient for compliance "
-            "and most cost-effective.[/dim]"
-        )
-        freq = typer.prompt(
-            "Finding publishing frequency",
-            default="SIX_HOURS",
-            type=click.Choice(["SIX_HOURS", "ONE_HOUR", "FIFTEEN_MINUTES"], case_sensitive=False),
-        )
-        auto = typer.prompt(
-            "Auto-enable in org accounts",
-            default="ALL",
-            type=click.Choice(["ALL", "NEW", "NONE"], case_sensitive=False),
-        )
-        console.print("[dim]Protection plans — each adds incremental cost.[/dim]")
-        s3 = typer.confirm("  Enable S3 data event detection?", default=True)
-        rds = typer.confirm("  Enable RDS login anomaly detection?", default=True)
-        eks = typer.confirm("  Enable EKS audit logs?", default=False)
-        console.print("[dim]  ⚠  Malware scanning is charged per GB scanned.[/dim]")
-        malware = typer.confirm("  Enable EC2 malware scanning?", default=False)
-        lambda_net = typer.confirm("  Enable Lambda network logs?", default=False)
-        services["guardduty"].update({
-            "detector": {"finding_publishing_frequency": freq.upper()},
-            "organization": {"auto_enable": auto.upper()},
-            "protection_plans": {
-                "s3_logs": s3, "rds_login_events": rds, "eks_audit_logs": eks,
-                "ec2_malware_scan": malware, "lambda_network_logs": lambda_net,
-                "eks_runtime": False, "ecs_runtime": False,
-            },
-        })
+    if configure_gd:
+        ex = existing.services.guardduty if existing else None
+        console.print("\n[bold cyan]GuardDuty[/bold cyan]")
+        console.print("[dim]Threat detection across all org accounts.[/dim]")
+        gd_enabled = typer.confirm("Enable GuardDuty?", default=ex.enabled if ex else True)
+        services["guardduty"] = {"enabled": gd_enabled}
+        if gd_enabled:
+            console.print(
+                "[dim]Finding publishing frequency: SIX_HOURS is sufficient for compliance "
+                "and most cost-effective.[/dim]"
+            )
+            freq = typer.prompt(
+                "Finding publishing frequency",
+                default=ex.detector.finding_publishing_frequency if ex else "SIX_HOURS",
+                type=click.Choice(["SIX_HOURS", "ONE_HOUR", "FIFTEEN_MINUTES"], case_sensitive=False),
+            )
+            auto = typer.prompt(
+                "Auto-enable in org accounts",
+                default=ex.organization.auto_enable if ex else "ALL",
+                type=click.Choice(["ALL", "NEW", "NONE"], case_sensitive=False),
+            )
+            pp = ex.protection_plans if ex else None
+            console.print("[dim]Protection plans — each adds incremental cost.[/dim]")
+            s3        = typer.confirm("  Enable S3 data event detection?",      default=pp.s3_logs            if pp else True)
+            rds       = typer.confirm("  Enable RDS login anomaly detection?",  default=pp.rds_login_events   if pp else True)
+            eks       = typer.confirm("  Enable EKS audit logs?",               default=pp.eks_audit_logs     if pp else False)
+            console.print("[dim]  ⚠  Malware scanning is charged per GB scanned.[/dim]")
+            malware   = typer.confirm("  Enable EC2 malware scanning?",         default=pp.ec2_malware_scan   if pp else False)
+            lambda_net = typer.confirm("  Enable Lambda network logs?",         default=pp.lambda_network_logs if pp else False)
+            services["guardduty"].update({
+                "detector": {"finding_publishing_frequency": freq.upper()},
+                "organization": {"auto_enable": auto.upper()},
+                "protection_plans": {
+                    "s3_logs": s3, "rds_login_events": rds, "eks_audit_logs": eks,
+                    "ec2_malware_scan": malware, "lambda_network_logs": lambda_net,
+                    "eks_runtime": pp.eks_runtime if pp else False,
+                    "ecs_runtime": pp.ecs_runtime if pp else False,
+                },
+            })
 
     # ── Security Hub ─────────────────────────────────────────────────────────
-    console.print("\n[bold cyan]Security Hub[/bold cyan]")
-    console.print(
-        "[dim]Aggregated security findings. Cost: ~$0.001/check/account/month.\n"
-        "Enable only standards you actively monitor and remediate.[/dim]"
-    )
-    sh_enabled = typer.confirm("Enable Security Hub?", default=True)
-    services["security_hub"] = {"enabled": sh_enabled}
-    if sh_enabled:
-        auto = typer.prompt(
-            "Auto-enable in org accounts",
-            default="ALL",
-            type=click.Choice(["ALL", "NEW", "NONE"], case_sensitive=False),
+    if configure_sh:
+        ex = existing.services.security_hub if existing else None
+        console.print("\n[bold cyan]Security Hub[/bold cyan]")
+        console.print(
+            "[dim]Aggregated security findings. Cost: ~$0.001/check/account/month.\n"
+            "Enable only standards you actively monitor and remediate.[/dim]"
         )
-        fsbp = typer.confirm("  Enable FSBP standard? (recommended)", default=True)
-        cis14 = typer.confirm("  Enable CIS 1.4 benchmark?", default=False)
-        cis30 = typer.confirm("  Enable CIS 3.0 benchmark?", default=False)
-        pci = typer.confirm("  Enable PCI DSS?", default=False)
-        nist = typer.confirm("  Enable NIST 800-53?", default=False)
-        console.print("[dim]  ⚠  Cross-region aggregation bills findings twice.[/dim]")
-        cross_region = typer.confirm("  Enable cross-region aggregation?", default=False)
-        services["security_hub"].update({
-            "organization": {"auto_enable": auto.upper()},
-            "standards": {
-                "fsbp": fsbp, "cis_1_4": cis14, "cis_3_0": cis30,
-                "pci_dss": pci, "nist": nist,
-            },
-            "cross_region_aggregation": cross_region,
-        })
+        sh_enabled = typer.confirm("Enable Security Hub?", default=ex.enabled if ex else True)
+        services["security_hub"] = {"enabled": sh_enabled}
+        if sh_enabled:
+            auto = typer.prompt(
+                "Auto-enable in org accounts",
+                default=ex.organization.auto_enable if ex else "ALL",
+                type=click.Choice(["ALL", "NEW", "NONE"], case_sensitive=False),
+            )
+            st = ex.standards if ex else None
+            fsbp       = typer.confirm("  Enable FSBP standard? (recommended)", default=st.fsbp    if st else True)
+            cis14      = typer.confirm("  Enable CIS 1.4 benchmark?",           default=st.cis_1_4 if st else False)
+            cis30      = typer.confirm("  Enable CIS 3.0 benchmark?",           default=st.cis_3_0 if st else False)
+            pci        = typer.confirm("  Enable PCI DSS?",                     default=st.pci_dss if st else False)
+            nist       = typer.confirm("  Enable NIST 800-53?",                 default=st.nist    if st else False)
+            console.print("[dim]  ⚠  Cross-region aggregation bills findings twice.[/dim]")
+            cross_region = typer.confirm(
+                "  Enable cross-region aggregation?",
+                default=ex.cross_region_aggregation if ex else False,
+            )
+            services["security_hub"].update({
+                "organization": {"auto_enable": auto.upper()},
+                "standards": {
+                    "fsbp": fsbp, "cis_1_4": cis14, "cis_3_0": cis30,
+                    "pci_dss": pci, "nist": nist,
+                },
+                "cross_region_aggregation": cross_region,
+            })
 
     # ── Macie ────────────────────────────────────────────────────────────────
-    console.print("\n[bold cyan]Macie[/bold cyan]")
-    console.print("[dim]Sensitive data discovery. Cost: $1/S3 bucket/month for evaluation.[/dim]")
-    mc_enabled = typer.confirm("Enable Macie?", default=True)
-    services["macie"] = {"enabled": mc_enabled}
-    if mc_enabled:
-        freq = typer.prompt(
-            "Finding publishing frequency",
-            default="SIX_HOURS",
-            type=click.Choice(["SIX_HOURS", "ONE_HOUR", "FIFTEEN_MINUTES"], case_sensitive=False),
-        )
-        console.print(
-            "[bold yellow]  ⚠  Automated sensitive data discovery scans ALL S3 object content.\n"
-            "     Can be very expensive in accounts with large data lakes.[/bold yellow]"
-        )
-        discovery = typer.confirm("  Enable automated sensitive data discovery?", default=False)
-        sampling = 100
-        if discovery:
-            console.print("[dim]  Sampling depth (1–100%). Lower = cheaper but less coverage.[/dim]")
-            sampling = typer.prompt("  Sampling depth %", default=100, type=int)
-        services["macie"].update({
-            "organization": {"auto_enable": True},
-            "session": {"finding_publishing_frequency": freq.upper()},
-            "automated_discovery": {
-                "enabled": discovery,
-                "sampling_depth": max(1, min(100, sampling)),
-                "managed_identifiers": "RECOMMENDED",
-            },
-        })
+    if configure_mc:
+        ex = existing.services.macie if existing else None
+        console.print("\n[bold cyan]Macie[/bold cyan]")
+        console.print("[dim]Sensitive data discovery. Cost: $1/S3 bucket/month for evaluation.[/dim]")
+        mc_enabled = typer.confirm("Enable Macie?", default=ex.enabled if ex else True)
+        services["macie"] = {"enabled": mc_enabled}
+        if mc_enabled:
+            freq = typer.prompt(
+                "Finding publishing frequency",
+                default=ex.session.finding_publishing_frequency if ex else "SIX_HOURS",
+                type=click.Choice(["SIX_HOURS", "ONE_HOUR", "FIFTEEN_MINUTES"], case_sensitive=False),
+            )
+            console.print(
+                "[bold yellow]  ⚠  Automated sensitive data discovery scans ALL S3 object content.\n"
+                "     Can be very expensive in accounts with large data lakes.[/bold yellow]"
+            )
+            ad = ex.automated_discovery if ex else None
+            discovery = typer.confirm(
+                "  Enable automated sensitive data discovery?",
+                default=ad.enabled if ad else False,
+            )
+            sampling = 100
+            if discovery:
+                console.print("[dim]  Sampling depth (1–100%). Lower = cheaper but less coverage.[/dim]")
+                sampling = typer.prompt(
+                    "  Sampling depth %",
+                    default=ad.sampling_depth if ad else 100,
+                    type=int,
+                )
+            services["macie"].update({
+                "organization": {"auto_enable": True},
+                "session": {"finding_publishing_frequency": freq.upper()},
+                "automated_discovery": {
+                    "enabled": discovery,
+                    "sampling_depth": max(1, min(100, sampling)),
+                    "managed_identifiers": ad.managed_identifiers if ad else "RECOMMENDED",
+                },
+            })
 
     # ── Inspector ────────────────────────────────────────────────────────────
-    console.print("\n[bold cyan]Inspector[/bold cyan]")
-    console.print(
-        "[dim]Vulnerability scanning. Cost: per EC2 instance, per ECR image push, "
-        "per Lambda function/month.[/dim]"
-    )
-    ins_enabled = typer.confirm("Enable Inspector?", default=True)
-    services["inspector"] = {"enabled": ins_enabled}
-    if ins_enabled:
-        ec2 = typer.confirm("  Enable EC2 scanning?", default=True)
-        ecr = typer.confirm("  Enable ECR image scanning?", default=True)
-        console.print("[dim]  ⚠  Lambda scanning adds cost per function per month.[/dim]")
-        lam = typer.confirm("  Enable Lambda scanning?", default=False)
-        lam_code = typer.confirm("  Enable Lambda code scanning?", default=False) if lam else False
-        services["inspector"].update({
-            "organization": {"auto_enable": True},
-            "scan_types": {"ec2": ec2, "ecr": ecr, "lambda": lam, "lambda_code": lam_code},
-        })
+    if configure_ins:
+        ex = existing.services.inspector if existing else None
+        console.print("\n[bold cyan]Inspector[/bold cyan]")
+        console.print(
+            "[dim]Vulnerability scanning. Cost: per EC2 instance, per ECR image push, "
+            "per Lambda function/month.[/dim]"
+        )
+        ins_enabled = typer.confirm("Enable Inspector?", default=ex.enabled if ex else True)
+        services["inspector"] = {"enabled": ins_enabled}
+        if ins_enabled:
+            sc = ex.scan_types if ex else None
+            ec2 = typer.confirm("  Enable EC2 scanning?",   default=sc.ec2             if sc else True)
+            ecr = typer.confirm("  Enable ECR image scanning?", default=sc.ecr          if sc else True)
+            console.print("[dim]  ⚠  Lambda scanning adds cost per function per month.[/dim]")
+            lam      = typer.confirm("  Enable Lambda scanning?",      default=sc.lambda_functions if sc else False)
+            lam_code = typer.confirm("  Enable Lambda code scanning?", default=sc.lambda_code      if sc else False) if lam else False
+            services["inspector"].update({
+                "organization": {"auto_enable": True},
+                "scan_types": {"ec2": ec2, "ecr": ecr, "lambda": lam, "lambda_code": lam_code},
+            })
 
     # ── Access Analyzer ──────────────────────────────────────────────────────
-    console.print("\n[bold cyan]Access Analyzer[/bold cyan]")
-    console.print("[dim]Identifies unintended external access to org resources.[/dim]")
-    aa_enabled = typer.confirm("Enable Access Analyzer?", default=True)
-    services["access_analyzer"] = {"enabled": aa_enabled}
-    if aa_enabled:
-        analyzers = [{"name": "standstill-org-analyzer", "type": "ORGANIZATION"}]
-        console.print(
-            "[bold yellow]  ⚠  Unused access analyzer costs ~$1.20/IAM role/month.[/bold yellow]"
-        )
-        unused = typer.confirm("  Enable unused access analyzer?", default=False)
-        if unused:
-            analyzers.append(
-                {"name": "standstill-unused-access-analyzer", "type": "ORGANIZATION_UNUSED_ACCESS"}
+    if configure_aa:
+        ex = existing.services.access_analyzer if existing else None
+        console.print("\n[bold cyan]Access Analyzer[/bold cyan]")
+        console.print("[dim]Identifies unintended external access to org resources.[/dim]")
+        aa_enabled = typer.confirm("Enable Access Analyzer?", default=ex.enabled if ex else True)
+        services["access_analyzer"] = {"enabled": aa_enabled}
+        if aa_enabled:
+            ex_types = {a.type for a in ex.analyzers} if ex else set()
+            analyzers = [{"name": "standstill-org-analyzer", "type": "ORGANIZATION"}]
+            console.print(
+                "[bold yellow]  ⚠  Unused access analyzer costs ~$1.20/IAM role/month.[/bold yellow]"
             )
-        services["access_analyzer"]["analyzers"] = analyzers
+            unused = typer.confirm(
+                "  Enable unused access analyzer?",
+                default="ORGANIZATION_UNUSED_ACCESS" in ex_types,
+            )
+            if unused:
+                analyzers.append(
+                    {"name": "standstill-unused-access-analyzer", "type": "ORGANIZATION_UNUSED_ACCESS"}
+                )
+            services["access_analyzer"]["analyzers"] = analyzers
 
     # ── Write file ───────────────────────────────────────────────────────────
     header = (
@@ -217,6 +291,114 @@ def init(
         "# Status:  standstill security status --file security_services.yaml\n\n"
     )
     output.write_text(header + yaml.dump(cfg, default_flow_style=False, sort_keys=False))
+    console.print(f"\n[green]✓[/green] Config written to [cyan]{output}[/cyan]")
+    console.print(
+        f"\n[dim]Review the file, then apply:\n"
+        f"  standstill security apply --file {output} --dry-run[/dim]"
+    )
+
+
+# ---------------------------------------------------------------------------
+# import
+# ---------------------------------------------------------------------------
+
+_SVC_LABELS_IMPORT = {
+    "guardduty":       "GuardDuty",
+    "security_hub":    "Security Hub",
+    "macie":           "Macie",
+    "inspector":       "Inspector",
+    "access_analyzer": "Access Analyzer",
+}
+
+
+@app.command("import")
+def import_cmd(
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Path for the generated config file."),
+    ] = _DEFAULT_FILE,
+    account: Annotated[
+        Optional[str],
+        typer.Option("--account", "-a", help="Delegated admin account ID."),
+    ] = None,
+    role_name: Annotated[
+        str,
+        typer.Option("--role-name", "-n", help="CT execution role to assume in the delegated admin account."),
+    ] = _DEFAULT_ROLE,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Overwrite output file without prompting."),
+    ] = False,
+) -> None:
+    """
+    Generate a config file from the live state of your AWS security services.
+
+    Reads the current configuration of each service from the delegated admin
+    account and writes it as a YAML file ready for use with 'security apply'.
+    """
+    console = renderer.console
+
+    # ── Resolve delegated admin ──────────────────────────────────────────────
+    delegated_admin = account or _config.get_delegated_admin()
+    if not delegated_admin:
+        err.print(
+            "[bold red]Error:[/bold red] Delegated admin account not set.\n"
+            "[dim]Provide --account <id> or run: standstill config set-delegated-admin <id>[/dim]"
+        )
+        raise typer.Exit(1)
+    if not _ACCT_RE.match(delegated_admin):
+        err.print(f"[bold red]Error:[/bold red] Invalid account ID: {delegated_admin}")
+        raise typer.Exit(1)
+
+    region = _state.state.region or "us-east-1"
+
+    # ── Confirm overwrite ────────────────────────────────────────────────────
+    if output.exists() and not yes:
+        if not typer.confirm(f"\n[yellow]{output}[/yellow] already exists. Overwrite?", default=False):
+            raise typer.Exit(0)
+
+    # ── Fetch live config ────────────────────────────────────────────────────
+    with console.status(
+        f"[bold]Reading live service configurations from {delegated_admin}...[/bold]"
+    ):
+        config_dict, errors = sec_api.read_service_configs(delegated_admin, role_name, region)
+
+    # ── Summary table ────────────────────────────────────────────────────────
+    t = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+    t.add_column("Service", style="bold")
+    t.add_column("Status", justify="center")
+    t.add_column("Notes", style="dim")
+
+    for svc, label in _SVC_LABELS_IMPORT.items():
+        svc_cfg = config_dict["services"].get(svc, {})
+        if svc in errors:
+            status_text = Text("error", style="bold red")
+            notes = errors[svc][:80]
+        elif svc_cfg.get("enabled"):
+            status_text = Text("imported", style="bold green")
+            notes = ""
+        else:
+            status_text = Text("disabled", style="dim")
+            notes = ""
+        t.add_row(label, status_text, notes)
+
+    console.print()
+    console.print(t)
+
+    if errors:
+        console.print(
+            "\n[yellow]Some services could not be read and will be written as disabled.[/yellow]"
+        )
+
+    # ── Write file ───────────────────────────────────────────────────────────
+    header = (
+        "# Standstill — Security Services Configuration\n"
+        f"# Imported from account {delegated_admin} (region {region})\n"
+        "# Apply:   standstill security apply --file security_services.yaml\n"
+        "# Dry run: standstill security apply --file security_services.yaml --dry-run\n"
+        "# Status:  standstill security status --file security_services.yaml\n\n"
+    )
+    output.write_text(header + yaml.dump(config_dict, default_flow_style=False, sort_keys=False))
     console.print(f"\n[green]✓[/green] Config written to [cyan]{output}[/cyan]")
     console.print(
         f"\n[dim]Review the file, then apply:\n"

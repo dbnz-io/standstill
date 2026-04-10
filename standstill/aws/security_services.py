@@ -586,6 +586,181 @@ def _fill_service_status(
 
 
 # ---------------------------------------------------------------------------
+# Import — read live configuration from delegated admin account
+# ---------------------------------------------------------------------------
+
+def read_service_configs(
+    admin_account: str,
+    role_name: str,
+    region: str,
+) -> tuple[dict, dict[str, str]]:
+    """
+    Read live service configurations from the delegated admin account.
+
+    Returns (config_dict, errors) where config_dict matches the YAML schema
+    and errors maps service names to error messages for any that failed.
+    """
+    errors: dict[str, str] = {}
+    services: dict = {}
+
+    # ── GuardDuty ─────────────────────────────────────────────────────────────
+    try:
+        gd = _admin_client("guardduty", admin_account, role_name, region)
+        detectors = gd.list_detectors().get("DetectorIds", [])
+        if not detectors:
+            services["guardduty"] = {"enabled": False}
+        else:
+            det = gd.get_detector(DetectorId=detectors[0])
+            enabled = det.get("Status") == "ENABLED"
+            freq = det.get("FindingPublishingFrequency", "SIX_HOURS")
+            auto_enable = "ALL"
+            raw_features: dict[str, str] = {}
+            try:
+                org_cfg = gd.describe_organization_configuration(DetectorId=detectors[0])
+                auto_enable = org_cfg.get("AutoEnable", "ALL")
+                raw_features = {
+                    f["Name"]: f.get("AutoEnable", "NONE")
+                    for f in org_cfg.get("Features", [])
+                }
+            except ClientError:
+                pass
+            protection_plans = {
+                cfg_key: raw_features.get(api_name, "NONE") != "NONE"
+                for cfg_key, api_name in GUARDDUTY_FEATURE_MAP.items()
+            }
+            services["guardduty"] = {
+                "enabled": enabled,
+                "detector": {"finding_publishing_frequency": freq},
+                "organization": {"auto_enable": auto_enable},
+                "protection_plans": protection_plans,
+            }
+    except (ClientError, RuntimeError) as exc:
+        errors["guardduty"] = str(exc)
+        services["guardduty"] = {"enabled": False}
+
+    # ── Security Hub ──────────────────────────────────────────────────────────
+    try:
+        sh = _admin_client("securityhub", admin_account, role_name, region)
+        sh_enabled = False
+        try:
+            sh.describe_hub()
+            sh_enabled = True
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] not in ("InvalidAccessException", "ResourceNotFoundException"):
+                raise
+        if not sh_enabled:
+            services["security_hub"] = {"enabled": False}
+        else:
+            org_cfg = sh.describe_organization_configuration()
+            auto_enable = "ALL" if org_cfg.get("AutoEnable") else "NONE"
+            subs = sh.get_enabled_standards().get("StandardsSubscriptions", [])
+            enabled_arns = {s["StandardsArn"] for s in subs}
+            standards = {
+                key: arn_tmpl.replace("{r}", region) in enabled_arns
+                for key, arn_tmpl in SECURITY_HUB_STANDARD_ARNS.items()
+            }
+            aggs = sh.list_finding_aggregators().get("FindingAggregators", [])
+            services["security_hub"] = {
+                "enabled": True,
+                "organization": {"auto_enable": auto_enable},
+                "standards": standards,
+                "cross_region_aggregation": bool(aggs),
+            }
+    except (ClientError, RuntimeError) as exc:
+        errors["security_hub"] = str(exc)
+        services["security_hub"] = {"enabled": False}
+
+    # ── Macie ─────────────────────────────────────────────────────────────────
+    try:
+        mc = _admin_client("macie2", admin_account, role_name, region)
+        mc_enabled = False
+        freq = "SIX_HOURS"
+        try:
+            session = mc.get_macie_session()
+            mc_enabled = session.get("status") == "ENABLED"
+            freq = session.get("findingPublishingFrequency", "SIX_HOURS")
+        except ClientError:
+            pass
+        if not mc_enabled:
+            services["macie"] = {"enabled": False}
+        else:
+            auto_enable = True
+            try:
+                org_cfg = mc.describe_organization_configuration()
+                auto_enable = org_cfg.get("autoEnable", True)
+            except ClientError:
+                pass
+            discovery_enabled = False
+            try:
+                disc = mc.get_automated_discovery_configuration()
+                discovery_enabled = disc.get("status") == "ENABLED"
+            except ClientError:
+                pass
+            services["macie"] = {
+                "enabled": True,
+                "organization": {"auto_enable": auto_enable},
+                "session": {"finding_publishing_frequency": freq},
+                "automated_discovery": {
+                    "enabled": discovery_enabled,
+                    "sampling_depth": 100,
+                    "managed_identifiers": "RECOMMENDED",
+                },
+            }
+    except (ClientError, RuntimeError) as exc:
+        errors["macie"] = str(exc)
+        services["macie"] = {"enabled": False}
+
+    # ── Inspector ─────────────────────────────────────────────────────────────
+    try:
+        ins = _admin_client("inspector2", admin_account, role_name, region)
+        ins_enabled = False
+        scan_types = {"ec2": False, "ecr": False, "lambda": False, "lambda_code": False}
+        try:
+            batch = ins.batch_get_account_status(accountIds=[admin_account])
+            resource_state = batch.get("accounts", [{}])[0].get("resourceState", {})
+            scan_types = {
+                "ec2":         resource_state.get("ec2",         {}).get("status") == "ENABLED",
+                "ecr":         resource_state.get("ecr",         {}).get("status") == "ENABLED",
+                "lambda":      resource_state.get("lambda",      {}).get("status") == "ENABLED",
+                "lambda_code": resource_state.get("lambdaCode",  {}).get("status") == "ENABLED",
+            }
+            ins_enabled = any(scan_types.values())
+        except ClientError:
+            pass
+        services["inspector"] = {
+            "enabled": ins_enabled,
+            "organization": {"auto_enable": True},
+            "scan_types": scan_types,
+        }
+    except (ClientError, RuntimeError) as exc:
+        errors["inspector"] = str(exc)
+        services["inspector"] = {"enabled": False}
+
+    # ── Access Analyzer ───────────────────────────────────────────────────────
+    try:
+        aa = _admin_client("accessanalyzer", admin_account, role_name, region)
+        analyzers = aa.list_analyzers().get("analyzers", [])
+        org_analyzers = [a for a in analyzers if "ORGANIZATION" in a.get("type", "")]
+        if not org_analyzers:
+            services["access_analyzer"] = {"enabled": False}
+        else:
+            services["access_analyzer"] = {
+                "enabled": True,
+                "analyzers": [{"name": a["name"], "type": a["type"]} for a in org_analyzers],
+            }
+    except (ClientError, RuntimeError) as exc:
+        errors["access_analyzer"] = str(exc)
+        services["access_analyzer"] = {"enabled": False}
+
+    config_dict = {
+        "version": "1",
+        "delegated_admin_account": admin_account,
+        "services": services,
+    }
+    return config_dict, errors
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
