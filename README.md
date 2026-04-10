@@ -269,64 +269,49 @@ standstill view controls && standstill security status
 ---
 
 ## Docker
-### Building the image locally
 
 ```bash
-docker build -t standstill .
-docker run --rm standstill --help
+docker pull ghcr.io/dbnz-io/standstill:latest
 ```
 
-The image entrypoint is `standstill`. Mount your AWS credentials and YAML files into the container:
+### Local development — named AWS profile
 
-**With environment variable credentials** (CI, assumed roles):
+Set up a shell alias once and use standstill exactly like the pip-installed version:
+
+```bash
+alias standstill='docker run --rm \
+  -v ~/.aws:/home/standstill/.aws:ro \
+  -v ~/.standstill:/home/standstill/.standstill \
+  -v "$(pwd)":/workspace \
+  ghcr.io/dbnz-io/standstill:latest'
+```
+
+```bash
+standstill --profile my-mgmt-profile --region us-east-1 check
+standstill view ous
+standstill apply --file controls.yaml --dry-run
+```
+
+The `-v "$(pwd)":/workspace` mount makes files in your current directory available as `/workspace` inside the container. It is only needed for commands that read a local file (`--file controls.yaml`). The alias includes it unconditionally so you don't have to think about it.
+
+### CI — environment variable credentials
 
 ```bash
 docker run --rm \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
   -e AWS_SESSION_TOKEN \
-  -v ~/.standstill:/root/.standstill \
+  -v ~/.standstill:/home/standstill/.standstill \
   -v "$(pwd)":/workspace \
   ghcr.io/dbnz-io/standstill:latest \
   apply --file /workspace/controls.yaml --dry-run
 ```
 
-**With a named AWS profile** (local development):
+### Building locally
 
 ```bash
-docker run --rm \
-  -v ~/.aws:/root/.aws:ro \
-  -v ~/.standstill:/root/.standstill \
-  -v "$(pwd)":/workspace \
-  ghcr.io/dbnz-io/standstill:latest \
-  --profile my-mgmt-profile --region us-east-1 \
-  apply --file /workspace/controls.yaml
-```
-
-| Mount | Purpose |
-|---|---|
-| `~/.aws:/root/.aws:ro` | Named profiles and credentials |
-| `~/.standstill:/root/.standstill` | Persistent CLI config and pending operations journal |
-| `$(pwd):/workspace` | Your YAML control and security service files |
-
-The working directory inside the container is `/workspace`, so relative file paths (`--file controls.yaml`) resolve against whatever directory you mount there.
-
-**Shell alias** for convenience:
-
-```bash
-alias standstill='docker run --rm \
-  -v ~/.aws:/root/.aws:ro \
-  -v ~/.standstill:/root/.standstill \
-  -v "$(pwd)":/workspace \
-  ghcr.io/dbnz-io/standstill:latest'
-```
-
-With the alias set, all commands work identically to the pip-installed version:
-
-```bash
-standstill check
-standstill view ous
-standstill apply --file controls.yaml --dry-run
+docker build -t standstill .
+docker run --rm standstill --help
 ```
 
 ---
