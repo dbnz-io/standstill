@@ -31,10 +31,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/dbnz-io/standstill-internal"
-Repository = "https://github.com/dbnz-io/standstill-internal"
-Issues = "https://github.com/dbnz-io/standstill-internal/issues"
-Changelog = "https://github.com/dbnz-io/standstill-internal/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/dbnz-io/standstill"
+Repository = "https://github.com/dbnz-io/standstill"
+Issues = "https://github.com/dbnz-io/standstill/issues"
+Changelog = "https://github.com/dbnz-io/standstill/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [

@@ -3,8 +3,8 @@
 ## Getting started
 
 ```bash
-git clone https://github.com/dbnz-io/standstill-internal
-cd standstill-internal
+git clone https://github.com/dbnz-io/standstill
+cd standstill
 pip install -e ".[dev]"
 ```
 
@@ -43,7 +43,7 @@ This refreshes the catalog from the live Control Tower API. Commit the updated f
 
 ## Reporting bugs
 
-Use [GitHub Issues](https://github.com/dbnz-io/standstill-internal/issues). Include:
+Use [GitHub Issues](https://github.com/dbnz-io/standstill/issues). Include:
 
 - The command you ran (redact account IDs and ARNs if needed)
 - The full error output

@@ -157,8 +157,8 @@ Run `standstill check` after installation to verify connectivity and permissions
 
 ```bash
 # 1. Install
-git clone https://github.com/dbnz-io/standstill-internal
-cd standstill-internal && pip install -e .
+git clone https://github.com/dbnz-io/standstill
+cd standstill && pip install -e .
 
 # 2. Verify connectivity
 standstill --profile my-mgmt-profile --region us-east-1 check
@@ -186,8 +186,8 @@ standstill apply --file examples/controls.yaml
 ## Installation
 
 ```bash
-git clone https://github.com/dbnz-io/standstill-internal
-cd standstill-internal
+git clone https://github.com/dbnz-io/standstill
+cd standstill
 pip install -e .
 ```
 
@@ -196,10 +196,10 @@ Requires Python 3.11+.
 ### Docker
 
 ```bash
-docker pull ghcr.io/dbnz-io/standstill-internal:latest
+docker pull ghcr.io/dbnz-io/standstill:latest
 ```
 
-See [Docker usage](#docker-1) below.
+See [Docker usage](#docker) below.
 
 ---
 
@@ -275,7 +275,7 @@ standstill view controls && standstill security status
 The container image is published to GitHub Container Registry on every tagged release.
 
 ```bash
-docker pull ghcr.io/dbnz-io/standstill-internal:latest
+docker pull ghcr.io/dbnz-io/standstill:latest
 ```
 
 The image entrypoint is `standstill`. Mount your AWS credentials and YAML files into the container:
@@ -289,7 +289,7 @@ docker run --rm \
   -e AWS_SESSION_TOKEN \
   -v ~/.ct-cli:/root/.ct-cli \
   -v "$(pwd)":/workspace \
-  ghcr.io/dbnz-io/standstill-internal:latest \
+  ghcr.io/dbnz-io/standstill:latest \
   apply --file /workspace/controls.yaml --dry-run
 ```
 
@@ -300,7 +300,7 @@ docker run --rm \
   -v ~/.aws:/root/.aws:ro \
   -v ~/.ct-cli:/root/.ct-cli \
   -v "$(pwd)":/workspace \
-  ghcr.io/dbnz-io/standstill-internal:latest \
+  ghcr.io/dbnz-io/standstill:latest \
   --profile my-mgmt-profile --region us-east-1 \
   apply --file /workspace/controls.yaml
 ```
@@ -320,7 +320,7 @@ alias standstill='docker run --rm \
   -v ~/.aws:/root/.aws:ro \
   -v ~/.ct-cli:/root/.ct-cli \
   -v "$(pwd)":/workspace \
-  ghcr.io/dbnz-io/standstill-internal:latest'
+  ghcr.io/dbnz-io/standstill:latest'
 ```
 
 With the alias set, all commands work identically to the pip-installed version:

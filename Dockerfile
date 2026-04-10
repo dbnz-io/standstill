@@ -13,7 +13,7 @@ FROM python:3.12-slim
 
 LABEL org.opencontainers.image.title="standstill" \
       org.opencontainers.image.description="AWS Control Tower management CLI" \
-      org.opencontainers.image.source="https://github.com/dbnz-io/standstill-internal" \
+      org.opencontainers.image.source="https://github.com/dbnz-io/standstill" \
       org.opencontainers.image.licenses="MPL-2.0"
 
 COPY --from=builder /dist/*.whl /dist/

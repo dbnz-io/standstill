@@ -1,0 +1,132 @@
+# AWS Config resource types required by AWS Security Hub
+# Source: FSBP v1.0.0 + CIS AWS Foundations Benchmark 1.4 / 3.0
+#
+# This list uses INCLUSION_BY_RESOURCE_TYPES — only what is listed is recorded.
+# allSupported is deliberately set to False to avoid recording thousands of
+# resource types that generate cost without adding Security Hub coverage.
+#
+# ─── Excluded types and why ──────────────────────────────────────────────────
+#
+#   AWS::CloudFormation::Stack            noisy — one record per resource per deploy
+#   AWS::Config::ResourceCompliance       creates evaluation feedback loops (Config
+#                                         records compliance → triggers rules → new
+#                                         compliance records → triggers rules again)
+#   AWS::Config::ConformancePackCompliance same feedback loop as above
+#   AWS::Config::ConfigurationRecorder    unnecessary meta-resource
+#   AWS::EC2::NetworkInterface            extremely high volume (NAT GW, RDS, LBs,
+#                                         Lambda, ECS tasks all create ENIs)
+#   AWS::SSM::PatchCompliance             high volume in managed fleets; not a
+#                                         Security Hub FSBP requirement
+#   AWS::SSM::AssociationCompliance       high volume; same reasoning
+#   AWS::CloudWatch::Alarm                not evaluated by Security Hub
+#
+# ─── User override ────────────────────────────────────────────────────────────
+# Copy this file to ~/.ct-cli/securityhub_resource_types.yaml to customise.
+# standstill will prefer the user copy over this bundled one.
+
+resource_types:
+
+  # ── Access Management ──────────────────────────────────────────────────────
+  # IAM.1  IAM.2  IAM.3  IAM.4  IAM.5  IAM.21  IAM.22
+  - AWS::IAM::User
+  - AWS::IAM::Role
+  - AWS::IAM::Policy
+  - AWS::IAM::Group
+  - AWS::AccessAnalyzer::Analyzer
+
+  # ── EC2 & Networking ───────────────────────────────────────────────────────
+  # EC2.2  EC2.3  EC2.6  EC2.8  EC2.18  EC2.19  EC2.21  EC2.22  EC2.23  EC2.25  EC2.28  EC2.29
+  - AWS::EC2::Instance
+  - AWS::EC2::SecurityGroup
+  - AWS::EC2::NetworkAcl
+  - AWS::EC2::Subnet
+  - AWS::EC2::VPC
+  - AWS::EC2::Volume
+  - AWS::EC2::RouteTable
+  - AWS::EC2::InternetGateway
+  - AWS::EC2::VPCEndpoint
+  - AWS::EC2::TransitGateway
+  - AWS::EC2::LaunchTemplate
+
+  # AutoScaling.1  .2  .3  .4  .5  .6  .9  .10
+  - AWS::AutoScaling::AutoScalingGroup
+  - AWS::AutoScaling::LaunchConfiguration
+
+  # ── Storage ────────────────────────────────────────────────────────────────
+  # S3.1  S3.2  S3.3  S3.5–S3.14
+  - AWS::S3::Bucket
+  - AWS::S3::AccountPublicAccessBlock
+  # DynamoDB.1  .2
+  - AWS::DynamoDB::Table
+
+  # ── Compute ────────────────────────────────────────────────────────────────
+  # Lambda.1  .2  .3  .5
+  - AWS::Lambda::Function
+  # ECS.1  .2  .3  .4  .5
+  - AWS::ECS::Cluster
+  - AWS::ECS::TaskDefinition
+  - AWS::ECS::Service
+  # EKS.1  .2
+  - AWS::EKS::Cluster
+  # SageMaker.1  .2  .3
+  - AWS::SageMaker::NotebookInstance
+
+  # ── Databases ──────────────────────────────────────────────────────────────
+  # RDS.1–.8  .10  .11  .13  .17  .25
+  - AWS::RDS::DBInstance
+  - AWS::RDS::DBCluster
+  - AWS::RDS::DBSnapshot
+  - AWS::RDS::DBClusterSnapshot
+  - AWS::RDS::EventSubscription
+  # Redshift.1–.4  .6  .7  .9  .10
+  - AWS::Redshift::Cluster
+  # ES.1–.8
+  - AWS::Elasticsearch::Domain
+  - AWS::OpenSearch::Domain
+  # MSK.1  .2
+  - AWS::MSK::Cluster
+
+  # ── Audit & Observability ──────────────────────────────────────────────────
+  # CloudTrail.1  .2  .4  .5
+  - AWS::CloudTrail::Trail
+  # GuardDuty.1
+  - AWS::GuardDuty::Detector
+  # SSM.1  (inventory only — patch/association compliance excluded, see above)
+  - AWS::SSM::ManagedInstanceInventory
+
+  # ── Security ───────────────────────────────────────────────────────────────
+  # KMS.1–.4
+  - AWS::KMS::Key
+  # SecretsManager.1–.4
+  - AWS::SecretsManager::Secret
+  # ACM.1  .2
+  - AWS::ACM::Certificate
+  # NetworkFirewall.3  .4  .5  .6  .9
+  - AWS::NetworkFirewall::Firewall
+  - AWS::NetworkFirewall::FirewallPolicy
+  - AWS::NetworkFirewall::RuleGroup
+
+  # ── Load Balancing ─────────────────────────────────────────────────────────
+  # ELB.2  .3  .5  .7  .9  .10
+  - AWS::ElasticLoadBalancing::LoadBalancer
+  # ELB.4  .5  .6  .12  .13
+  - AWS::ElasticLoadBalancingV2::LoadBalancer
+
+  # ── Application Services ───────────────────────────────────────────────────
+  # SNS.1  .2
+  - AWS::SNS::Topic
+  # SQS.1
+  - AWS::SQS::Queue
+  # APIGateway.1–.5
+  - AWS::ApiGateway::RestApi
+  - AWS::ApiGateway::Stage
+  # APIGateway.8  .9
+  - AWS::ApiGatewayV2::Api
+  - AWS::ApiGatewayV2::Stage
+  # CodeBuild.1–.5
+  - AWS::CodeBuild::Project
+  # CloudFront.1–.13
+  - AWS::CloudFront::Distribution
+  # WAF.10  .11  .12
+  - AWS::WAFv2::WebACL
+  - AWS::WAFv2::RuleGroup

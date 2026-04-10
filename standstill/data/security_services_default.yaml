@@ -1,0 +1,151 @@
+# Standstill — Security Services Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Single source of truth for all security services at AWS Organizations level.
+#
+# Apply:    standstill security apply --file security_services.yaml
+# Dry run:  standstill security apply --file security_services.yaml --dry-run
+# Status:   standstill security status --file security_services.yaml
+#
+# Execution model:
+#   Phase 1 — run from the management account:
+#              registers `delegated_admin_account` as the admin for each service.
+#   Phase 2 — run from `delegated_admin_account` (via AWSControlTowerExecution):
+#              configures every service according to the settings below.
+
+version: "1"
+
+# 12-digit AWS account ID for the central security tooling account.
+# All services will be managed from here.
+delegated_admin_account: "REPLACE_WITH_ACCOUNT_ID"
+
+services:
+
+  # ── GuardDuty ──────────────────────────────────────────────────────────────
+  # Threat detection across all org accounts.
+  # Cost model: per 1M events analysed; protection plans add per-resource cost.
+  guardduty:
+    enabled: true
+
+    detector:
+      # How often findings are exported to EventBridge / S3.
+      # Does NOT affect detection speed — only dashboard/SIEM freshness.
+      # SIX_HOURS is the most cost-effective for compliance workloads.
+      # Options: FIFTEEN_MINUTES | ONE_HOUR | SIX_HOURS
+      finding_publishing_frequency: SIX_HOURS
+
+    organization:
+      # Whether GuardDuty is enabled in member accounts automatically.
+      # ALL  — current + future accounts  (recommended)
+      # NEW  — future accounts only
+      # NONE — manual enrolment required
+      auto_enable: ALL
+
+    protection_plans:
+      # Each plan analyses a specific data source. Enable only what fits your workloads.
+      s3_logs: true           # S3 data event threat detection     — recommended baseline
+      rds_login_events: true  # RDS/Aurora login anomaly detection — low cost, high value
+
+      eks_audit_logs: false   # EKS Kubernetes audit logs          — enable if you run K8s
+      eks_runtime: false      # EKS runtime monitoring (agent)     — extra per-node cost
+      ecs_runtime: false      # ECS runtime monitoring (agent)     — extra per-task cost
+      lambda_network_logs: false  # Lambda network activity         — per-invocation cost
+
+      # ⚠  Charged per GB of EBS storage scanned on-demand.
+      ec2_malware_scan: false
+
+  # ── Security Hub ───────────────────────────────────────────────────────────
+  # Aggregated security findings and compliance posture management.
+  # Cost model: ~$0.001 per security check per account per month.
+  #             Each enabled standard multiplies the check count.
+  security_hub:
+    enabled: true
+
+    organization:
+      # Whether Security Hub is enabled in member accounts automatically.
+      # Options: ALL | NEW | NONE
+      auto_enable: ALL
+
+    standards:
+      # Enable only standards you actively monitor and remediate.
+      # Unused standards generate findings that inflate cost without value.
+      fsbp: true      # AWS Foundational Security Best Practices v1.0.0  ← start here
+      cis_1_4: false  # CIS AWS Foundations Benchmark v1.4.0
+      cis_3_0: false  # CIS AWS Foundations Benchmark v3.0.0
+      pci_dss: false  # PCI DSS v3.2.1            — only if you process card data
+      nist: false     # NIST SP 800-53 Rev. 5     — only if you need NIST compliance
+
+    # Cross-region aggregation: pulls findings from all regions into one home region.
+    # ⚠  Each aggregated finding is billed again in the aggregation region.
+    cross_region_aggregation: false
+    # aggregation_region: us-east-1   # uncomment when cross_region_aggregation: true
+
+  # ── Macie ──────────────────────────────────────────────────────────────────
+  # Sensitive data discovery and S3 security posture.
+  # Cost model: $1 per S3 bucket per month (evaluation, always-on when enabled).
+  macie:
+    enabled: true
+
+    organization:
+      auto_enable: true
+
+    session:
+      # How often Macie publishes findings to EventBridge / S3.
+      # Options: FIFTEEN_MINUTES | ONE_HOUR | SIX_HOURS
+      finding_publishing_frequency: SIX_HOURS
+
+    automated_discovery:
+      # ⚠  COST WARNING: scans S3 object content continuously.
+      # Charged per GB sampled. Can be very expensive in data-heavy accounts.
+      # Recommended: leave disabled and run targeted classification jobs instead.
+      enabled: false
+
+      # Percentage of objects sampled per bucket (1–100).
+      # Reducing this cuts cost proportionally but also reduces coverage.
+      sampling_depth: 100
+
+      # Which managed data identifiers to use during discovery.
+      # RECOMMENDED — AWS-curated set (balanced coverage vs noise)
+      # ALL          — every identifier (more findings, more cost)
+      # NONE         — identifiers only from custom_data_identifiers below
+      managed_identifiers: RECOMMENDED
+
+    # ARNs of custom Macie data identifiers to include in automated discovery.
+    # Leave empty to rely solely on managed_identifiers.
+    # custom_data_identifiers: []
+
+  # ── Inspector ──────────────────────────────────────────────────────────────
+  # Vulnerability management for EC2, containers, and Lambda.
+  # Cost model: per EC2 instance/month, per ECR image push, per Lambda fn/month.
+  inspector:
+    enabled: true
+
+    organization:
+      auto_enable: true
+
+    scan_types:
+      # Enable only scan types relevant to your workloads.
+      ec2: true           # EC2 OS + package CVE scanning           — recommended
+      ecr: true           # Container image CVE scanning on push    — low per-image cost
+      lambda: false       # Lambda dependency CVE scanning          — per function/month
+      lambda_code: false  # Lambda code analysis (needs lambda: true)
+
+  # ── Access Analyzer ────────────────────────────────────────────────────────
+  # Identifies unintended external access to org resources via IAM policy analysis.
+  # Cost model: ORGANIZATION type — effectively free for most orgs.
+  #             ORGANIZATION_UNUSED_ACCESS — ~$1.20 per IAM role analysed per month.
+  access_analyzer:
+    enabled: true
+
+    # Define one or more analyzers. Each entry creates (or reuses) an analyzer
+    # of the given type in the delegated admin account.
+    #
+    # Supported types:
+    #   ORGANIZATION              — finds external access granted to org resources
+    #   ORGANIZATION_UNUSED_ACCESS — finds over-permissive / stale IAM principals
+    analyzers:
+      - name: standstill-org-analyzer
+        type: ORGANIZATION
+
+      # ⚠  Uncomment to enable unused-access analysis (~$1.20/role/month):
+      # - name: standstill-unused-access-analyzer
+      #   type: ORGANIZATION_UNUSED_ACCESS

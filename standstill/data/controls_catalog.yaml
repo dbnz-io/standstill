@@ -1,0 +1,193 @@
+# AWS Control Tower Controls Catalog
+# Source: https://docs.aws.amazon.com/controltower/latest/controlreference/
+#
+# {region} is substituted at runtime with the --region flag or AWS_DEFAULT_REGION.
+# Behaviors: PREVENTIVE (SCP) | DETECTIVE (Config rule) | PROACTIVE (CFN hook)
+# Severities: CRITICAL | HIGH | MEDIUM | LOW
+
+controls:
+
+  # ─────────────────────────────────────────
+  # PREVENTIVE — Service Control Policies (SCPs)
+  # These block non-compliant actions before they happen.
+  # ─────────────────────────────────────────
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_RESTRICT_ROOT_USER"
+    name: "Disallow actions as a root user"
+    behavior: PREVENTIVE
+    severity: CRITICAL
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_RESTRICT_ROOT_USER_ACCESS_KEYS"
+    name: "Disallow creation of access keys for the root user"
+    behavior: PREVENTIVE
+    severity: CRITICAL
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_DISALLOW_CHANGES_TO_CLOUDTRAIL_LOG_CONFIGURATION"
+    name: "Disallow configuration changes to CloudTrail"
+    behavior: PREVENTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_DISALLOW_CHANGES_TO_CLOUDWATCH_SETUP"
+    name: "Disallow changes to Amazon CloudWatch set up by AWS Control Tower"
+    behavior: PREVENTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_DISALLOW_CHANGES_TO_CONFIG_RULES_CREATED_BY_CONTROL_TOWER"
+    name: "Disallow changes to AWS Config rules set up by AWS Control Tower"
+    behavior: PREVENTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_DISALLOW_CHANGES_TO_LAMBDA_CREATED_BY_CONTROL_TOWER"
+    name: "Disallow changes to AWS Lambda functions set up by AWS Control Tower"
+    behavior: PREVENTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_DISALLOW_CHANGES_TO_SNS_CREATED_BY_CONTROL_TOWER"
+    name: "Disallow changes to Amazon SNS set up by AWS Control Tower"
+    behavior: PREVENTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_DISALLOW_CHANGES_TO_SNS_SUBSCRIPTIONS_CREATED_BY_CONTROL_TOWER"
+    name: "Disallow changes to Amazon SNS subscriptions set up by AWS Control Tower"
+    behavior: PREVENTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_ENCRYPTED_VOLUMES"
+    name: "Disallow launch of Amazon EC2 instance types that are not EBS-optimized"
+    behavior: PREVENTIVE
+    severity: MEDIUM
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_RDS_STORAGE_ENCRYPTED"
+    name: "Disallow Amazon RDS database instances that are not storage encrypted"
+    behavior: PREVENTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_DISALLOW_CROSS_REGION_NETWORKING"
+    name: "Disallow cross-region networking for Amazon EC2, Amazon CloudFront, and AWS STS"
+    behavior: PREVENTIVE
+    severity: MEDIUM
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_DISALLOW_VPC_INTERNET_ACCESS"
+    name: "Disallow internet access for an Amazon VPC instance managed by a customer"
+    behavior: PREVENTIVE
+    severity: HIGH
+
+  # ─────────────────────────────────────────
+  # DETECTIVE — AWS Config Rules
+  # These continuously evaluate resources and alert on drift.
+  # ─────────────────────────────────────────
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_CLOUDTRAIL_ENABLED"
+    name: "Detect whether CloudTrail is enabled"
+    behavior: DETECTIVE
+    severity: CRITICAL
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_CONFIG_ENABLED"
+    name: "Detect whether AWS Config is enabled"
+    behavior: DETECTIVE
+    severity: CRITICAL
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_IAM_USER_MFA_ENABLED"
+    name: "Detect whether MFA is enabled for IAM users"
+    behavior: DETECTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_ROOT_ACCOUNT_MFA_ENABLED"
+    name: "Detect whether MFA is enabled for the root account"
+    behavior: DETECTIVE
+    severity: CRITICAL
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_S3_BUCKET_PUBLIC_READ_PROHIBITED"
+    name: "Detect whether public read access is enabled for Amazon S3 buckets"
+    behavior: DETECTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_S3_BUCKET_PUBLIC_WRITE_PROHIBITED"
+    name: "Detect whether public write access is enabled for Amazon S3 buckets"
+    behavior: DETECTIVE
+    severity: CRITICAL
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_EBS_OPTIMIZED_INSTANCE"
+    name: "Detect whether Amazon EBS optimization is enabled for Amazon EC2 instances"
+    behavior: DETECTIVE
+    severity: LOW
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_ENCRYPTED_VOLUMES_DETECTIVE"
+    name: "Detect whether Amazon EBS volumes attached to Amazon EC2 are encrypted"
+    behavior: DETECTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_RDS_INSTANCE_PUBLIC_ACCESS_CHECK"
+    name: "Detect whether Amazon RDS database instances are publicly accessible"
+    behavior: DETECTIVE
+    severity: CRITICAL
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_GUARDDUTY_ENABLED_CENTRALIZED"
+    name: "Detect whether Amazon GuardDuty is enabled"
+    behavior: DETECTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_AUDIT_BUCKET_ENCRYPTION_ENABLED"
+    name: "Detect whether the AWS Control Tower audit Amazon S3 bucket is encrypted"
+    behavior: DETECTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_AUDIT_BUCKET_LOGGING_ENABLED"
+    name: "Detect whether access logging is enabled for the AWS Control Tower audit Amazon S3 bucket"
+    behavior: DETECTIVE
+    severity: MEDIUM
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_AUDIT_BUCKET_RETENTION_POLICY"
+    name: "Detect whether the audit bucket has a retention policy configured"
+    behavior: DETECTIVE
+    severity: MEDIUM
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_IAM_USER_CONSOLE_ACCESS_MFA_ENABLED"
+    name: "Detect whether MFA is enabled for IAM users that have console access"
+    behavior: DETECTIVE
+    severity: HIGH
+
+  # ─────────────────────────────────────────
+  # PROACTIVE — CloudFormation Hooks
+  # These intercept CloudFormation deployments before resources are created.
+  # ─────────────────────────────────────────
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_PROACTIVE_CT_1_PREVENT_UNENCRYPTED_S3"
+    name: "Require server-side encryption for Amazon S3 buckets (proactive)"
+    behavior: PROACTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_PROACTIVE_CT_2_BLOCK_PUBLIC_S3"
+    name: "Block public access settings for Amazon S3 buckets (proactive)"
+    behavior: PROACTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_PROACTIVE_CT_3_REQUIRE_RDS_ENCRYPTION"
+    name: "Require encryption for Amazon RDS DB instances (proactive)"
+    behavior: PROACTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_PROACTIVE_CT_4_REQUIRE_EBS_ENCRYPTION"
+    name: "Require encryption for Amazon EBS volumes (proactive)"
+    behavior: PROACTIVE
+    severity: HIGH
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_PROACTIVE_CT_5_REQUIRE_VPC_FLOW_LOGS"
+    name: "Require VPC flow logs to be enabled (proactive)"
+    behavior: PROACTIVE
+    severity: MEDIUM
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_PROACTIVE_CT_6_REQUIRE_CLOUDTRAIL"
+    name: "Require CloudTrail to be enabled on all accounts (proactive)"
+    behavior: PROACTIVE
+    severity: CRITICAL
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_PROACTIVE_CT_7_PREVENT_PUBLIC_RDS"
+    name: "Prevent public access for Amazon RDS DB instances (proactive)"
+    behavior: PROACTIVE
+    severity: CRITICAL
+
+  - arn: "arn:aws:controltower:{region}::control/AWS-GR_PROACTIVE_CT_8_REQUIRE_MFA"
+    name: "Require MFA for IAM user console access (proactive)"
+    behavior: PROACTIVE
+    severity: HIGH
