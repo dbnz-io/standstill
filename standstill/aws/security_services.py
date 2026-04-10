@@ -617,7 +617,10 @@ def read_service_configs(
             raw_features: dict[str, str] = {}
             try:
                 org_cfg = gd.describe_organization_configuration(DetectorId=detectors[0])
-                auto_enable = org_cfg.get("AutoEnable", "ALL")
+                # Prefer the newer string field; fall back to mapping the deprecated boolean.
+                auto_enable = org_cfg.get("AutoEnableOrganizationMembers") or (
+                    "ALL" if org_cfg.get("AutoEnable") else "NONE"
+                )
                 raw_features = {
                     f["Name"]: f.get("AutoEnable", "NONE")
                     for f in org_cfg.get("Features", [])
@@ -687,7 +690,7 @@ def read_service_configs(
             auto_enable = True
             try:
                 org_cfg = mc.describe_organization_configuration()
-                auto_enable = org_cfg.get("autoEnable", True)
+                auto_enable = bool(org_cfg.get("autoEnable", True))
             except ClientError:
                 pass
             discovery_enabled = False

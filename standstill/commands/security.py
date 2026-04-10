@@ -354,7 +354,8 @@ def import_cmd(
 
     # ── Confirm overwrite ────────────────────────────────────────────────────
     if output.exists() and not yes:
-        if not typer.confirm(f"\n[yellow]{output}[/yellow] already exists. Overwrite?", default=False):
+        console.print(f"\n[yellow]{output}[/yellow] already exists.")
+        if not typer.confirm("Overwrite?", default=False):
             raise typer.Exit(0)
 
     # ── Fetch live config ────────────────────────────────────────────────────
