@@ -200,7 +200,7 @@ def render_resource_types_list(
     active_set = set(active)
 
     source_label = (
-        "[green]user override[/green] (~/.ct-cli/securityhub_resource_types.yaml)"
+        "[green]user override[/green] (~/.standstill/securityhub_resource_types.yaml)"
         if is_user_override
         else "[dim]bundled defaults[/dim]"
     )

@@ -21,7 +21,7 @@ _STATUS_STYLES = {
 
 @app.command("list")
 def operations_list() -> None:
-    """Show all operations saved in the pending journal (~/.ct-cli/pending_operations.yaml)."""
+    """Show all operations saved in the pending journal (~/.standstill/pending_operations.yaml)."""
     ops = ct_api.load_pending_operations()
     if not ops:
         console.print("[dim]No pending operations.[/dim]")

@@ -37,7 +37,7 @@ def catalog_build(
         bool,
         typer.Option(
             "--update-cache/--no-update-cache",
-            help="Save fetched controls to ~/.ct-cli/catalog.yaml for use by 'ct apply --enable-all'.",
+            help="Save fetched controls to ~/.standstill/catalog.yaml for use by 'ct apply --enable-all'.",
         ),
     ] = True,
 ) -> None:
@@ -49,7 +49,7 @@ def catalog_build(
       • {output_dir}/detective_controls.yaml
       • {output_dir}/proactive_controls.yaml
 
-    Also updates ~/.ct-cli/catalog.yaml (used by 'ct apply --enable-all').
+    Also updates ~/.standstill/catalog.yaml (used by 'ct apply --enable-all').
 
     \b
     Note: ListControls is not yet in boto3's service model, so this command

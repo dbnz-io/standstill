@@ -88,7 +88,7 @@ standstill apply --enable-detective --ou ou-ab12-34cd5678 --concurrency 20
 
 ### Pending operations journal
 
-If AWS credentials expire during a long-running apply, standstill catches the expiry, writes all in-flight operations to a local journal (`~/.ct-cli/pending_operations.yaml`), and exits cleanly. The journal can be checked and cleared in a subsequent session:
+If AWS credentials expire during a long-running apply, standstill catches the expiry, writes all in-flight operations to a local journal (`~/.standstill/pending_operations.yaml`), and exits cleanly. The journal can be checked and cleared in a subsequent session:
 
 ```bash
 standstill operations list
@@ -287,7 +287,7 @@ docker run --rm \
   -e AWS_ACCESS_KEY_ID \
   -e AWS_SECRET_ACCESS_KEY \
   -e AWS_SESSION_TOKEN \
-  -v ~/.ct-cli:/root/.ct-cli \
+  -v ~/.standstill:/root/.standstill \
   -v "$(pwd)":/workspace \
   ghcr.io/dbnz-io/standstill:latest \
   apply --file /workspace/controls.yaml --dry-run
@@ -298,7 +298,7 @@ docker run --rm \
 ```bash
 docker run --rm \
   -v ~/.aws:/root/.aws:ro \
-  -v ~/.ct-cli:/root/.ct-cli \
+  -v ~/.standstill:/root/.standstill \
   -v "$(pwd)":/workspace \
   ghcr.io/dbnz-io/standstill:latest \
   --profile my-mgmt-profile --region us-east-1 \
@@ -308,7 +308,7 @@ docker run --rm \
 | Mount | Purpose |
 |---|---|
 | `~/.aws:/root/.aws:ro` | Named profiles and credentials |
-| `~/.ct-cli:/root/.ct-cli` | Persistent CLI config and pending operations journal |
+| `~/.standstill:/root/.standstill` | Persistent CLI config and pending operations journal |
 | `$(pwd):/workspace` | Your YAML control and security service files |
 
 The working directory inside the container is `/workspace`, so relative file paths (`--file controls.yaml`) resolve against whatever directory you mount there.
@@ -318,7 +318,7 @@ The working directory inside the container is `/workspace`, so relative file pat
 ```bash
 alias standstill='docker run --rm \
   -v ~/.aws:/root/.aws:ro \
-  -v ~/.ct-cli:/root/.ct-cli \
+  -v ~/.standstill:/root/.standstill \
   -v "$(pwd)":/workspace \
   ghcr.io/dbnz-io/standstill:latest'
 ```

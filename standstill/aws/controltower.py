@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 _TERMINAL_STATUSES = {"SUCCEEDED", "FAILED"}
 _THROTTLE_CODES = {"ThrottlingException", "Throttling", "RequestThrottled"}
 _BUNDLED_CATALOG_PATH = Path(__file__).parent.parent / "data" / "controls_catalog.yaml"
-_USER_CATALOG_PATH = Path.home() / ".ct-cli" / "catalog.yaml"
-_PENDING_OPS_PATH = Path.home() / ".ct-cli" / "pending_operations.yaml"
+_USER_CATALOG_PATH = Path.home() / ".standstill" / "catalog.yaml"
+_PENDING_OPS_PATH = Path.home() / ".standstill" / "pending_operations.yaml"
 
 BEHAVIORS = ("PREVENTIVE", "DETECTIVE", "PROACTIVE")
 
@@ -57,7 +57,7 @@ def load_catalog(
 ) -> dict[str, Control]:
     """
     Load the controls catalog.
-    Prefers ~/.ct-cli/catalog.yaml (built by 'catalog build') over the bundled fallback.
+    Prefers ~/.standstill/catalog.yaml (built by 'catalog build') over the bundled fallback.
     Substitutes {region} in ARNs.  Optionally filters by behavior, service, or common_control name.
     Returns: {resolved_arn: Control}
     """
@@ -224,7 +224,7 @@ def fetch_common_control_mapping(region: str) -> dict[str, list[str]]:
 
 def save_user_catalog(controls: list[dict], region: str) -> Path:
     """
-    Persist a fetched and enriched controls list to ~/.ct-cli/catalog.yaml.
+    Persist a fetched and enriched controls list to ~/.standstill/catalog.yaml.
     Returns the path written.
     """
     _USER_CATALOG_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

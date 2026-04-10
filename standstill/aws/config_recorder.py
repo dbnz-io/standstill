@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from standstill.aws.organizations import Account
 
 _BUNDLED_TYPES_PATH = Path(__file__).parent.parent / "data" / "securityhub_resource_types.yaml"
-_USER_TYPES_PATH = Path.home() / ".ct-cli" / "securityhub_resource_types.yaml"
+_USER_TYPES_PATH = Path.home() / ".standstill" / "securityhub_resource_types.yaml"
 
 RECORDING_FREQUENCIES = ("CONTINUOUS", "DAILY")
 
@@ -46,7 +46,7 @@ def load_user_resource_types() -> list[str] | None:
 def load_resource_types() -> list[str]:
     """
     Return the active resource type list.
-    Prefers ~/.ct-cli/securityhub_resource_types.yaml over the bundled fallback.
+    Prefers ~/.standstill/securityhub_resource_types.yaml over the bundled fallback.
     """
     user = load_user_resource_types()
     return user if user is not None else load_bundled_resource_types()

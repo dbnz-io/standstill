@@ -24,7 +24,7 @@ def set_profile(
     """
     Set the default AWS profile for standstill.
 
-    The profile name is persisted to ~/.ct-cli/config.yaml and used for all
+    The profile name is persisted to ~/.standstill/config.yaml and used for all
     subsequent commands without needing to pass --profile each time.
     The --profile flag still overrides this value when provided.
     """
@@ -46,7 +46,7 @@ def set_delegated_admin(
     """
     Set the delegated security administrator account.
 
-    Persisted to ~/.ct-cli/config.yaml and used automatically by
+    Persisted to ~/.standstill/config.yaml and used automatically by
     'security status' and 'security assess' when no --account or --file is given.
     """
     if not _ACCT_RE.match(account_id):
@@ -68,7 +68,7 @@ def unset_delegated_admin() -> None:
 
 @app.command("show")
 def show() -> None:
-    """Show the current standstill configuration (~/.ct-cli/config.yaml)."""
+    """Show the current standstill configuration (~/.standstill/config.yaml)."""
     data = _config.load()
     t = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
     t.add_column("Key", style="bold cyan")

@@ -5,7 +5,7 @@ from typing import Any
 
 import yaml
 
-_CONFIG_PATH = Path.home() / ".ct-cli" / "config.yaml"
+_CONFIG_PATH = Path.home() / ".standstill" / "config.yaml"
 
 
 def load() -> dict[str, Any]:

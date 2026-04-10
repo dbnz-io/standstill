@@ -16,7 +16,7 @@ from standstill.state import AppState
 
 @pytest.fixture
 def isolated_config(tmp_path, monkeypatch):
-    config_path = tmp_path / ".ct-cli" / "config.yaml"
+    config_path = tmp_path / ".standstill" / "config.yaml"
     monkeypatch.setattr(cfg_module, "_CONFIG_PATH", config_path)
     return config_path
 

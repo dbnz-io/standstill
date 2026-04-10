@@ -21,7 +21,7 @@
 #   AWS::CloudWatch::Alarm                not evaluated by Security Hub
 #
 # ─── User override ────────────────────────────────────────────────────────────
-# Copy this file to ~/.ct-cli/securityhub_resource_types.yaml to customise.
+# Copy this file to ~/.standstill/securityhub_resource_types.yaml to customise.
 # standstill will prefer the user copy over this bundled one.
 
 resource_types:
