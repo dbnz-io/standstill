@@ -109,12 +109,22 @@ standstill security assess                                  # member account hea
 
 ### Config recorder management
 
-Detective controls depend on AWS Config recorders being active in every account. standstill audits recorder state across the organization and can configure or start recorders where they are missing or stopped:
+Detective controls depend on AWS Config recorders being active in every account. AWS Config is also the most common source of unexpected cost in a Control Tower deployment — the default `allSupported` mode records every resource type AWS supports, including high-volume types like CloudFormation stacks, ENIs, and SSM compliance items, that generate millions of configuration items per month without adding meaningful security coverage.
+
+standstill sidesteps this by configuring recorders in `INCLUSION_BY_RESOURCE_TYPES` mode, recording only the specific types that Security Hub standards and the enrolled detective controls actually evaluate. The bundled list is tuned to exclude high-churn types. It can be inspected and customized before any recorder is touched:
+
+```bash
+standstill recorder types list              # show the active inclusion list
+standstill recorder types add TYPE          # add a resource type
+standstill recorder types remove TYPE       # remove a resource type
+standstill recorder types reset             # revert to bundled Security Hub defaults
+```
+
+Once the inclusion list reflects what you need, auditing and configuring recorders across the organization is a two-step operation:
 
 ```bash
 standstill recorder status --all
 standstill recorder setup  --all
-standstill recorder types list
 ```
 
 ### Organization visibility
