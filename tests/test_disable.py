@@ -1,12 +1,12 @@
 """Tests for commands/disable.py."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import pathlib
+import tempfile
+from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
-import standstill.aws.controltower as ct_api
 from standstill.aws.controltower import Control, EnabledControl
 from standstill.aws.organizations import OUNode
 from standstill.main import app
@@ -143,7 +143,6 @@ class TestDisableCommand:
         ou = _make_ou()
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
         f_content = f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n"
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f_content)
             fpath = f.name

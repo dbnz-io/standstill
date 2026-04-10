@@ -9,7 +9,6 @@ from typer.testing import CliRunner
 import standstill.aws.landing_zone as lz_api
 from standstill.aws.landing_zone import (
     LandingZone,
-    LzServiceSettings,
     LzSettings,
     _parse_manifest,
     build_updated_manifest,

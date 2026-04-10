@@ -1,8 +1,9 @@
 """Extended tests for commands/apply.py and aws/controltower.py poll/fetch paths."""
 from __future__ import annotations
 
-import time
-from unittest.mock import MagicMock, patch, call
+import pathlib
+import tempfile
+from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -17,9 +18,8 @@ from standstill.aws.controltower import (
     _resolve_ct_arn,
     poll_operation,
 )
-from standstill.aws.organizations import OUNode
-from standstill.aws.session import check_ct_permissions, check_all_account_roles, get_caller_identity
-from standstill.aws.organizations import Account
+from standstill.aws.organizations import Account, OUNode
+from standstill.aws.session import check_all_account_roles, check_ct_permissions, get_caller_identity
 from standstill.main import app
 
 runner = CliRunner()
@@ -266,7 +266,6 @@ class TestPollOperation:
 
     def test_session_expired_retry_succeeds(self):
         """First call raises ExpiredToken, retry after reset succeeds."""
-        mock_ct = MagicMock()
         mock_ct2 = MagicMock()
         mock_ct2.get_control_operation.return_value = {
             "controlOperation": {"status": "SUCCEEDED"}
@@ -457,7 +456,6 @@ class TestApplyExtended:
         ou = _make_ou()
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
         f_content = f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n"
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f_content)
             fpath = f.name
@@ -483,7 +481,6 @@ class TestApplyExtended:
     def test_apply_ou_not_found_in_run(self):
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
         # Use a valid-format OU ID that simply won't exist in the empty mocked org tree
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f"targets:\n  - ou_id: ou-ab12-99zz9999\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
@@ -501,7 +498,6 @@ class TestApplyExtended:
         ou = _make_ou()
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
         already_enabled = [EnabledControl(control_arn=ctrl_arn, ou_arn=ou.arn, status="SUCCEEDED")]
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
@@ -522,7 +518,6 @@ class TestApplyExtended:
         """Submit operations without waiting for them to complete."""
         ou = _make_ou()
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
@@ -543,7 +538,6 @@ class TestApplyExtended:
     def test_apply_waits_and_succeeds(self):
         ou = _make_ou()
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
@@ -567,7 +561,6 @@ class TestApplyExtended:
     def test_apply_poll_fails(self):
         ou = _make_ou()
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
@@ -589,7 +582,6 @@ class TestApplyExtended:
     def test_apply_session_expired_during_poll(self):
         ou = _make_ou()
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
@@ -612,7 +604,6 @@ class TestApplyExtended:
     def test_apply_submit_client_error(self):
         ou = _make_ou()
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
@@ -635,7 +626,6 @@ class TestApplyExtended:
     def test_apply_timeout_during_poll(self):
         ou = _make_ou()
         ctrl_arn = "arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES"
-        import tempfile, pathlib
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
