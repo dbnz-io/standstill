@@ -193,14 +193,6 @@ pip install -e .
 
 Requires Python 3.11+.
 
-### Docker
-
-```bash
-docker pull ghcr.io/dbnz-io/standstill:latest
-```
-
-See [Docker usage](#docker) below.
-
 ---
 
 ---
@@ -269,43 +261,6 @@ standstill view controls && standstill security status
 ---
 
 ## Docker
-
-```bash
-docker pull ghcr.io/dbnz-io/standstill:latest
-```
-
-### Local development — named AWS profile
-
-Set up a shell alias once and use standstill exactly like the pip-installed version:
-
-```bash
-alias standstill='docker run --rm \
-  -v ~/.aws:/home/standstill/.aws:ro \
-  -v ~/.standstill:/home/standstill/.standstill \
-  -v "$(pwd)":/workspace \
-  ghcr.io/dbnz-io/standstill:latest'
-```
-
-```bash
-standstill --profile my-mgmt-profile --region us-east-1 check
-standstill view ous
-standstill apply --file controls.yaml --dry-run
-```
-
-The `-v "$(pwd)":/workspace` mount makes files in your current directory available as `/workspace` inside the container. It is only needed for commands that read a local file (`--file controls.yaml`). The alias includes it unconditionally so you don't have to think about it.
-
-### CI — environment variable credentials
-
-```bash
-docker run --rm \
-  -e AWS_ACCESS_KEY_ID \
-  -e AWS_SECRET_ACCESS_KEY \
-  -e AWS_SESSION_TOKEN \
-  -v ~/.standstill:/home/standstill/.standstill \
-  -v "$(pwd)":/workspace \
-  ghcr.io/dbnz-io/standstill:latest \
-  apply --file /workspace/controls.yaml --dry-run
-```
 
 ### Building locally
 
