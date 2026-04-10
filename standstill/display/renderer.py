@@ -516,7 +516,7 @@ def render_security_status(statuses: list[ServiceStatus]) -> None:
             _SVC_LABELS.get(s.service, s.service),
             s.delegated_admin or "—",
             enabled_icon,
-            s.auto_enable or "—",
+            str(s.auto_enable) if s.auto_enable not in (None, "", "—") else "—",
             details,
         )
 
