@@ -62,8 +62,12 @@ def init(
         "[dim]All security services will be managed from this account.\n"
         "It should be a dedicated security tooling account, not the management account.[/dim]"
     )
+    _stored_admin = _config.get_delegated_admin()
     while True:
-        delegated_admin = typer.prompt("\nDelegated admin account ID")
+        delegated_admin = typer.prompt(
+            "\nDelegated admin account ID",
+            default=_stored_admin if _stored_admin else ...,
+        )
         if _ACCT_RE.match(delegated_admin):
             break
         err.print("[bold red]Invalid account ID.[/bold red] Expected 12 digits.")
