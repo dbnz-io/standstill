@@ -1,0 +1,95 @@
+# Preventive controls — enforced via Service Control Policies (SCPs).
+# These block non-compliant API actions before they happen.
+#
+# Generated: 2026-04-08
+# Region:    us-east-1
+# Controls:  69
+#
+# Replace REPLACE_WITH_OU_ID with your actual OU ID.
+# List available OUs with:  ct view ous
+#
+# Apply:          ct apply --file preventive_controls.yaml
+# Dry-run first:  ct apply --file preventive_controls.yaml --dry-run
+
+version: "1"
+
+targets:
+  - ou_id: REPLACE_WITH_OU_ID
+    controls:
+
+      # ── CRITICAL (────────────────────────────────)
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CT_AUDIT_BUCKET_POLICY_CHANGES_PROHIBITED  # Disallow Changes to Bucket Policy for AWS Control Tower Created S3 Buckets in Log Archive  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CT_AUDIT_BUCKET_ENCRYPTION_CHANGES_PROHIBITED  # Disallow Changes to Encryption Configuration for AWS Control Tower Created S3 Buckets in Log Archive  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CT_AUDIT_BUCKET_LIFECYCLE_CONFIGURATION_CHANGES_PROHIBITED  # Disallow Changes to Lifecycle Configuration for AWS Control Tower Created S3 Buckets in Log Archive  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CT_AUDIT_BUCKET_LOGGING_CONFIGURATION_CHANGES_PROHIBITED  # Disallow Changes to Logging Configuration for AWS Control Tower Created S3 Buckets in Log Archive  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CONFIG_RULE_CHANGE_PROHIBITED  # Disallow changes to AWS Config Rules set up by Control Tower  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_SNS_CHANGE_PROHIBITED  # Disallow changes to Amazon SNS set up by Control Tower  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.SNS.PV.1  # Disallow changes to Amazon SNS subscriptions and topics managed by AWS Control Tower  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_SNS_SUBSCRIPTION_CHANGE_PROHIBITED  # Disallow changes to Amazon SNS subscriptions set up by Control Tower  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_LOG_GROUP_POLICY  # Disallow changes to CloudWatch Logs Log Groups  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CLOUDWATCH_EVENTS_CHANGE_PROHIBITED  # Disallow changes to CloudWatch set up by Control Tower  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_IAM_ROLE_CHANGE_PROHIBITED  # Disallow changes to IAM roles set up by AWS Control Tower and AWS CloudFormation  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_LAMBDA_CHANGE_PROHIBITED  # Disallow changes to Lambda functions set up by Control Tower  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CONFIG_AGGREGATION_CHANGE_PROHIBITED  # Disallow changes to tags created by AWS Control Tower for AWS Config resources  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CLOUDTRAIL_CHANGE_PROHIBITED  # Disallow configuration changes to AWS CloudTrail  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CONFIG_CHANGE_PROHIBITED  # Disallow configuration changes to AWS Config  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_RESTRICT_ROOT_USER_ACCESS_KEYS  # Disallow creation of access keys for the root user  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CONFIG_AGGREGATION_AUTHORIZATION_POLICY  # Disallow deletion of AWS Config Aggregation Authorizations  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_AUDIT_BUCKET_DELETION_PROHIBITED  # Disallow deletion of log archive  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.BACKUP.PV.1  # Disallow modification of a tag that AWS Control Tower applies to AWS Backup resources  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.BACKUP.PV.2  # Disallow modification of an AWS Backup report plan that AWS Control Tower manages  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.BACKUP.PV.3  # Disallow modification of an AWS Backup resource that AWS Control Tower manages  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.IAM.PV.1  # Disallow modification of an AWS IAM role that AWS Control Tower utilizes to manage AWS Backup resources  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.S3.PV.1  # Disallow modification of an Amazon S3 bucket that stores AWS Backup reports for AWS Control Tower  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.S3.PV.7  # Disallow modifications to AWS Config recorder Amazon S3 buckets managed by AWS Control Tower  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.S3.PV.8  # Disallow modifications to Amazon S3 buckets managed by AWS Control Tower  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CLOUDTRAIL_ENABLED  # Enable AWS CloudTrail in all available regions  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CONFIG_ENABLED  # Enable AWS Config in all available regions  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CLOUDTRAIL_VALIDATION_ENABLED  # Enable integrity validation for CloudTrail log file  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_CLOUDTRAIL_CLOUDWATCH_LOGS_ENABLED  # Integrate CloudTrail events with CloudWatch logs  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.LAMBDA.PV.1  # Require an AWS Lambda function URL to use AWS IAM-based authentication  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.3  # Require that an Amazon EBS snapshot cannot be publicly restorable  [SERVICE_CONTROL_POLICY]
+
+      # ── HIGH (────────────────────────────────────)
+      - arn:aws:controltower:us-east-1::control/AWS-GR_RESTRICT_ROOT_USER  # Disallow actions as a root user  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.S3.PV.6  # Require all object uploads to Amazon S3 buckets to use server-side encryption with an AWS KMS key (SSE-KMS)  [RESOURCE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.S3.PV.2  # Require all requests to Amazon S3 resources use authentication based on an Authorization header  [RESOURCE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.APPSYNC.PV.1  # Require an AWS AppSync GraphQL API to be configured with private visibility  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.KMS.PV.1  # Require an AWS KMS key policy to have a statement that limits creation of AWS KMS grants to AWS services  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.LAMBDA.PV.2  # Require an AWS Lambda function or AWS Lambda function URL to be configured for access only to principals within your AWS account  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.1  # Require an Amazon EBS snapshot to be created from an encrypted EC2 volume  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.S3.PV.5  # Require encryption of data in transit for calls to Amazon S3 resources  [RESOURCE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.S3.PV.3  # Require requests to Amazon S3 resources to use a minimum TLS version of 1.3  [RESOURCE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.4  # Require that Amazon EBS direct APIs are not called  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.KMS.PV.2  # Require that an AWS KMS asymmetric key with RSA key material used for encryption does not have a key length of 2048 bits  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.KMS.PV.5  # Require that an AWS KMS customer-managed key (CMK) is configured with imported key material  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.KMS.PV.4  # Require that an AWS KMS customer-managed key (CMK) is configured with key material originating from AWS CloudHSM  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.KMS.PV.6  # Require that an AWS KMS customer-managed key (CMK) is configured with key material originating from an external key store (XKS)  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.KMS.PV.3  # Require that an AWS KMS key is configured with the bypass policy lockout safety check enabled  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.2  # Require that an attached Amazon EBS volume is configured to encrypt data at rest  [SERVICE_CONTROL_POLICY]
+
+      # ── MEDIUM (──────────────────────────────────)
+      - arn:aws:controltower:us-east-1::control/CT.MULTISERVICE.PV.1  # Deny access to AWS based on the requested AWS Region for an organizational unit  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_REGION_DENY  # Deny access to AWS based on the requested AWS Region for the landing zone  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_DISALLOW_VPN_CONNECTIONS  # Disallow Amazon Virtual Private Network (VPN) connections  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.9  # Disallow access to the EC2 serial console for all EC2 instances  [DECLARATIVE_POLICY_EC2]
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.7  # Disallow all public sharing of Amazon EBS snapshots  [DECLARATIVE_POLICY_EC2]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_RESTRICT_S3_CROSS_REGION_REPLICATION  # Disallow cross region replication for S3 buckets  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_DISALLOW_CROSS_REGION_NETWORKING  # Disallow cross-region networking for Amazon EC2, Amazon CloudFront, and AWS Global Accelerator  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_RESTRICT_S3_DELETE_WITHOUT_MFA  # Disallow delete actions on S3 buckets without MFA  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.8  # Disallow inbound and outbound internet connections to your VPCs through an internet gateway (IGW) or egress-only internet gateway (EIGW)  [DECLARATIVE_POLICY_EC2]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_DISALLOW_VPC_INTERNET_ACCESS  # Disallow internet access for an Amazon VPC instance managed by a customer  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_AUDIT_BUCKET_ENCRYPTION_ENABLED  # Disallow modification of an Amazon S3 bucket default encryption  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_AUDIT_BUCKET_LOGGING_ENABLED  # Disallow modification of server access logging for an Amazon S3 bucket  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_AUDIT_BUCKET_POLICY_CHANGES_PROHIBITED  # Disallow policy changes to an Amazon S3 bucket  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.11  # Disallow public sharing of Amazon Machine Images (AMIs)  [DECLARATIVE_POLICY_EC2]
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.5  # Disallow the use of Amazon EC2 VM import and export  [SERVICE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.KMS.PV.7  # Require that the organization's AWS Key Management Service resources are accessible only by IAM principals that belong to the organization, or by an AWS service  [RESOURCE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.SECRETSMANAGER.PV.1  # Require that the organization's AWS Secrets Manager resources are accessible only by IAM principals that belong to the organization or by an AWS service  [RESOURCE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.STS.PV.1  # Require that the organization's AWS Security Token Service resources are accessible only by IAM principals that belong to the organization, or by an AWS service  [RESOURCE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.S3.PV.4  # Require that the organization's Amazon S3 resources are accessible only by IAM principals that belong to the organization or by an AWS service  [RESOURCE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/CT.SQS.PV.1  # Require that the organization's Amazon SQS resources are accessible only by IAM principals that belong to the organization, or by an AWS service  [RESOURCE_CONTROL_POLICY]
+      - arn:aws:controltower:us-east-1::control/AWS-GR_AUDIT_BUCKET_RETENTION_POLICY  # Set a retention policy for log archive  [SERVICE_CONTROL_POLICY]
+
+      # ── LOW (─────────────────────────────────────)
+      - arn:aws:controltower:us-east-1::control/CT.EC2.PV.6  # Disallow the use of deprecated Amazon EC2 RequestSpotFleet and RequestSpotInstances API actions  [SERVICE_CONTROL_POLICY]

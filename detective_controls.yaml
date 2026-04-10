@@ -1,0 +1,22 @@
+# Detective controls — implemented via AWS Config rules.
+# These continuously evaluate resources and flag non-compliant findings.
+# They do NOT block actions; they detect and report drift.
+#
+# Generated: 2026-04-09
+# Region:    us-east-1
+# Controls:  1
+#
+# Replace REPLACE_WITH_OU_ID with your actual OU ID.
+# List available OUs with:  ct view ous
+#
+# Apply:          ct apply --file detective_controls.yaml
+# Dry-run first:  ct apply --file detective_controls.yaml --dry-run
+
+version: "1"
+
+targets:
+  - ou_id: REPLACE_WITH_OU_ID
+    controls:
+
+      # ── HIGH (────────────────────────────────────)
+      - arn:aws:controltower:us-east-1::control/AWS-GR_TEST  # Test control

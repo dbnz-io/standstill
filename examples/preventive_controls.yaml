@@ -1,0 +1,37 @@
+version: "1"
+
+# Preventive controls — enforced via Service Control Policies (SCPs).
+# These block non-compliant API actions before they happen.
+#
+# Replace REGION with your CT home region (e.g. us-east-1, eu-west-1).
+# Replace OU IDs with your actual OU IDs — run: ct view ous
+#
+# Apply:          ct apply --file preventive_controls.yaml
+# Dry-run first:  ct apply --file preventive_controls.yaml --dry-run
+
+targets:
+  - ou_id: REPLACE_WITH_OU_ID       # e.g. ou-ab12-34cd5678
+
+    controls:
+
+      # ── Identity & Root Protection (CRITICAL) ──────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_RESTRICT_ROOT_USER
+      - arn:aws:controltower:REGION::control/AWS-GR_RESTRICT_ROOT_USER_ACCESS_KEYS
+
+      # ── Control Tower Infrastructure Protection (HIGH) ─────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_DISALLOW_CHANGES_TO_CLOUDTRAIL_LOG_CONFIGURATION
+      - arn:aws:controltower:REGION::control/AWS-GR_DISALLOW_CHANGES_TO_CLOUDWATCH_SETUP
+      - arn:aws:controltower:REGION::control/AWS-GR_DISALLOW_CHANGES_TO_CONFIG_RULES_CREATED_BY_CONTROL_TOWER
+      - arn:aws:controltower:REGION::control/AWS-GR_DISALLOW_CHANGES_TO_LAMBDA_CREATED_BY_CONTROL_TOWER
+      - arn:aws:controltower:REGION::control/AWS-GR_DISALLOW_CHANGES_TO_SNS_CREATED_BY_CONTROL_TOWER
+      - arn:aws:controltower:REGION::control/AWS-GR_DISALLOW_CHANGES_TO_SNS_SUBSCRIPTIONS_CREATED_BY_CONTROL_TOWER
+
+      # ── Data Encryption at Rest (HIGH) ─────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_RDS_STORAGE_ENCRYPTED
+
+      # ── Network Isolation (MEDIUM–HIGH) ────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_DISALLOW_VPC_INTERNET_ACCESS
+      - arn:aws:controltower:REGION::control/AWS-GR_DISALLOW_CROSS_REGION_NETWORKING
+
+      # ── Compute (MEDIUM) ───────────────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_ENCRYPTED_VOLUMES

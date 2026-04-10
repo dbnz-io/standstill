@@ -1,0 +1,37 @@
+version: "1"
+
+# Proactive controls — implemented via AWS CloudFormation Hooks.
+# These intercept CloudFormation deployments BEFORE resources are provisioned
+# and block the stack if it would create non-compliant resources.
+# Requires CloudFormation to be used for resource provisioning.
+#
+# Replace REGION with your CT home region (e.g. us-east-1, eu-west-1).
+# Replace OU IDs with your actual OU IDs — run: ct view ous
+#
+# Apply:          ct apply --file proactive_controls.yaml
+# Dry-run first:  ct apply --file proactive_controls.yaml --dry-run
+
+targets:
+  - ou_id: REPLACE_WITH_OU_ID       # e.g. ou-ab12-34cd5678
+
+    controls:
+
+      # ── Observability (CRITICAL) ────────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_PROACTIVE_CT_6_REQUIRE_CLOUDTRAIL
+
+      # ── Storage: S3 (HIGH) ──────────────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_PROACTIVE_CT_1_PREVENT_UNENCRYPTED_S3
+      - arn:aws:controltower:REGION::control/AWS-GR_PROACTIVE_CT_2_BLOCK_PUBLIC_S3
+
+      # ── Database (CRITICAL–HIGH) ─────────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_PROACTIVE_CT_3_REQUIRE_RDS_ENCRYPTION
+      - arn:aws:controltower:REGION::control/AWS-GR_PROACTIVE_CT_7_PREVENT_PUBLIC_RDS
+
+      # ── Compute (HIGH) ──────────────────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_PROACTIVE_CT_4_REQUIRE_EBS_ENCRYPTION
+
+      # ── Networking (MEDIUM) ─────────────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_PROACTIVE_CT_5_REQUIRE_VPC_FLOW_LOGS
+
+      # ── Identity (HIGH) ─────────────────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_PROACTIVE_CT_8_REQUIRE_MFA

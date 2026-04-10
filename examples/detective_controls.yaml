@@ -1,0 +1,46 @@
+version: "1"
+
+# Detective controls — implemented via AWS Config rules.
+# These continuously evaluate resources and flag non-compliant findings.
+# They do NOT block actions; they detect and report drift.
+#
+# Replace REGION with your CT home region (e.g. us-east-1, eu-west-1).
+# Replace OU IDs with your actual OU IDs — run: ct view ous
+#
+# Apply:          ct apply --file detective_controls.yaml
+# Dry-run first:  ct apply --file detective_controls.yaml --dry-run
+
+targets:
+  - ou_id: REPLACE_WITH_OU_ID       # e.g. ou-ab12-34cd5678
+
+    controls:
+
+      # ── Observability Baseline (CRITICAL) ──────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_CLOUDTRAIL_ENABLED
+      - arn:aws:controltower:REGION::control/AWS-GR_CONFIG_ENABLED
+
+      # ── Identity & MFA (CRITICAL–HIGH) ─────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_ROOT_ACCOUNT_MFA_ENABLED
+      - arn:aws:controltower:REGION::control/AWS-GR_IAM_USER_MFA_ENABLED
+      - arn:aws:controltower:REGION::control/AWS-GR_IAM_USER_CONSOLE_ACCESS_MFA_ENABLED
+
+      # ── Storage: S3 Public Access (CRITICAL–HIGH) ──────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_S3_BUCKET_PUBLIC_WRITE_PROHIBITED
+      - arn:aws:controltower:REGION::control/AWS-GR_S3_BUCKET_PUBLIC_READ_PROHIBITED
+
+      # ── Storage: Audit Bucket Integrity (MEDIUM–HIGH) ──────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_AUDIT_BUCKET_ENCRYPTION_ENABLED
+      - arn:aws:controltower:REGION::control/AWS-GR_AUDIT_BUCKET_LOGGING_ENABLED
+      - arn:aws:controltower:REGION::control/AWS-GR_AUDIT_BUCKET_RETENTION_POLICY
+
+      # ── Database Exposure (CRITICAL) ───────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_RDS_INSTANCE_PUBLIC_ACCESS_CHECK
+
+      # ── Encryption at Rest (HIGH) ──────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_ENCRYPTED_VOLUMES_DETECTIVE
+
+      # ── Threat Detection (HIGH) ────────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_GUARDDUTY_ENABLED_CENTRALIZED
+
+      # ── Compute Optimization (LOW) ─────────────────────────────────────
+      - arn:aws:controltower:REGION::control/AWS-GR_EBS_OPTIMIZED_INSTANCE

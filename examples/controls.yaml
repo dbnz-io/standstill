@@ -1,0 +1,23 @@
+version: "1"
+
+# Apply controls to specific OUs.
+# Run `ct view ous` to find OU IDs.
+# Run `ct view controls` to see what's already enabled.
+#
+# Usage:
+#   ct --profile my-profile --region us-east-1 apply --file controls.yaml
+#   ct apply --file controls.yaml --dry-run
+
+targets:
+  - ou_id: ou-ab12-34cd5678      # e.g. "Security" OU
+    controls:
+      # Preventive — block unencrypted EBS volumes
+      - arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES
+      # Preventive — block unencrypted RDS storage
+      - arn:aws:controltower:us-east-1::control/AWS-GR_RDS_STORAGE_ENCRYPTED
+      # Detective — detect public S3 buckets
+      - arn:aws:controltower:us-east-1::control/AWS-GR_S3_BUCKET_PUBLIC_READ_PROHIBITED
+
+  - ou_id: ou-cd34-56ef7890      # e.g. "Workloads" OU
+    controls:
+      - arn:aws:controltower:us-east-1::control/AWS-GR_ENCRYPTED_VOLUMES
