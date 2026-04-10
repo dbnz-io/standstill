@@ -260,8 +260,6 @@ standstill check
 standstill view ous
 standstill accounts check-roles
 standstill recorder status --all && standstill recorder setup --all
-standstill apply --enable-detective  --ou <ou-id> --dry-run
-standstill apply --enable-detective  --ou <ou-id> --concurrency 20
 standstill apply --file preventive_controls.yaml  --dry-run
 standstill apply --file preventive_controls.yaml
 standstill security init && standstill security apply --file security_services.yaml
@@ -271,11 +269,11 @@ standstill view controls && standstill security status
 ---
 
 ## Docker
-
-The container image is published to GitHub Container Registry on every tagged release.
+### Building the image locally
 
 ```bash
-docker pull ghcr.io/dbnz-io/standstill:latest
+docker build -t standstill .
+docker run --rm standstill --help
 ```
 
 The image entrypoint is `standstill`. Mount your AWS credentials and YAML files into the container:
@@ -329,13 +327,6 @@ With the alias set, all commands work identically to the pip-installed version:
 standstill check
 standstill view ous
 standstill apply --file controls.yaml --dry-run
-```
-
-### Building the image locally
-
-```bash
-docker build -t standstill .
-docker run --rm standstill --help
 ```
 
 ---
