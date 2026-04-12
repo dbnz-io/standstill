@@ -68,15 +68,42 @@ standstill apply --file controls.yaml --dry-run   # plan
 standstill apply --file controls.yaml             # apply
 ```
 
-### Bulk enablement
+The same file format works for disabling controls:
+
+```bash
+standstill disable --file controls.yaml --dry-run
+standstill disable --file controls.yaml
+```
+
+### Bulk enablement and disable
 
 For bootstrapping a new OU or landing zone, entire control tiers can be enrolled in a single command:
 
 ```bash
 standstill apply --enable-detective  --ou ou-ab12-34cd5678
 standstill apply --enable-preventive --ou ou-ab12-34cd5678
+standstill apply --enable-proactive  --ou ou-ab12-34cd5678
 standstill apply --enable-all        --ou ou-ab12-34cd5678
 ```
+
+Disabling by tier works symmetrically:
+
+```bash
+standstill disable --disable-detective  --ou ou-ab12-34cd5678
+standstill disable --disable-preventive --ou ou-ab12-34cd5678
+standstill disable --disable-all        --ou ou-ab12-34cd5678
+```
+
+### Interactive control selection
+
+When you want to enable or disable a subset of controls without writing a YAML file, `--category` launches an interactive picker. It prompts for a primary filter dimension (behavior, AWS service, or common control) and then an optional severity filter:
+
+```bash
+standstill apply   --category --ou ou-ab12-34cd5678
+standstill disable --category --ou ou-ab12-34cd5678
+```
+
+The picker only shows behaviors and severities that exist in the loaded catalog, so every selection produces at least one control.
 
 ### Parallel apply
 
@@ -88,12 +115,13 @@ standstill apply --enable-detective --ou ou-ab12-34cd5678 --concurrency 20
 
 ### Pending operations journal
 
-If AWS credentials expire during a long-running apply, standstill catches the expiry, writes all in-flight operations to a local journal (`~/.standstill/pending_operations.yaml`), and exits cleanly. The journal can be checked and cleared in a subsequent session:
+If AWS credentials expire during a long-running apply, standstill catches the expiry, writes all in-flight operations to a local journal (`~/.standstill/pending_operations.yaml`), and exits cleanly. The journal can be checked in a subsequent session:
 
 ```bash
 standstill operations list
-standstill operations check
-standstill operations check --clear
+standstill operations check           # poll status; does not modify the journal
+standstill operations check --clear   # poll status and remove completed entries
+standstill operations clear           # remove all entries immediately
 ```
 
 ### Security services configuration
@@ -101,10 +129,17 @@ standstill operations check --clear
 An interactive wizard generates a YAML configuration file covering all five security services with cost annotations at each step. The generated file can be version-controlled and applied idempotently:
 
 ```bash
-standstill security init                                    # generate config
+standstill security init                                    # interactive wizard → generates YAML
 standstill security apply --file security_services.yaml    # deploy org-wide
 standstill security status                                  # current state
 standstill security assess                                  # member account health
+```
+
+If you have security services already deployed and want to bring them under standstill management, `security pull` snapshots the live configuration into a local YAML file:
+
+```bash
+standstill security pull --account 123456789012
+standstill security apply --file security_services.yaml --dry-run
 ```
 
 ### Config recorder management
@@ -205,8 +240,6 @@ Requires Python 3.11+.
 
 ---
 
----
-
 ## Command reference
 
 ```
@@ -223,21 +256,36 @@ standstill [--profile PROFILE] [--region REGION] [--output table|json] COMMAND
   apply --enable-preventive --ou Enable all Preventive controls
   apply --enable-detective  --ou Enable all Detective controls
   apply --enable-proactive  --ou Enable all Proactive controls
+  apply --category        --ou   Interactively select controls to enable
     --dry-run                    Preview changes without applying
+    --yes / -y                   Skip confirmation prompt
     --concurrency N              Parallel submissions (default: 10)
     --no-wait                    Submit and return immediately
+
+  disable --file FILE                  Disable controls declared in a YAML file
+  disable --disable-all      --ou      Disable every enabled control on the OU
+  disable --disable-preventive --ou    Disable all enabled Preventive controls
+  disable --disable-detective  --ou    Disable all enabled Detective controls
+  disable --disable-proactive  --ou    Disable all enabled Proactive controls
+  disable --category           --ou    Interactively select controls to disable
+    --dry-run                          Preview changes without applying
+    --yes / -y                         Skip confirmation prompt
+    --concurrency N                    Parallel submissions (default: 10)
+    --no-wait                          Submit and return immediately
 
   catalog info                   Show catalog metadata
   catalog build                  Refresh catalog from the live CT API
 
   operations list                Show pending CT operations
-  operations check [--clear]     Poll operations; optionally remove completed
-  operations clear               Clear all operations from the journal
+  operations check [--clear]     Poll live status; --clear removes completed entries
+  operations clear               Remove all entries from the journal
 
   security init [--output FILE]              Interactive config wizard
+  security pull [--account ID]               Snapshot live config to a YAML file
   security apply --file FILE [--dry-run]     Deploy security services org-wide
-  security status                            Current state of all security services
-  security assess                            Member account health across all services
+    --yes / -y                               Skip confirmation prompt
+  security status [--account ID | --file F]  Current state of all security services
+  security assess [--account ID | --file F]  Member account health across all services
 
   recorder status --all | --account ID       Show recorder state
   recorder setup  --all | --account ID       Configure and start recorders
@@ -248,8 +296,16 @@ standstill [--profile PROFILE] [--region REGION] [--output table|json] COMMAND
 
   accounts check-roles [--role-name NAME]    Verify CT execution role in every account
 
+  lz status                      Show landing zone status, version, and drift state
+  lz reset                       Remediate landing zone drift
+  lz update                      Upgrade the landing zone to the latest version
+  lz settings                    Show landing zone service settings
+  lz settings-set                Update landing zone service settings
+
   config set-profile PROFILE                 Set the default AWS profile
   config unset-profile                       Remove the default AWS profile
+  config set-delegated-admin ACCOUNT_ID      Set the default delegated security admin account
+  config unset-delegated-admin               Remove the default delegated security admin account
   config show                                Show current CLI configuration
 ```
 
@@ -262,8 +318,8 @@ standstill check
 standstill view ous
 standstill accounts check-roles
 standstill recorder status --all && standstill recorder setup --all
-standstill apply --file preventive_controls.yaml  --dry-run
-standstill apply --file preventive_controls.yaml
+standstill apply --file examples/preventive_controls.yaml --dry-run
+standstill apply --file examples/preventive_controls.yaml
 standstill security init && standstill security apply --file security_services.yaml
 standstill view controls && standstill security status
 ```
@@ -276,7 +332,27 @@ standstill view controls && standstill security status
 
 ```bash
 docker build -t standstill .
-docker run --rm standstill --help
+```
+
+### Running with AWS credentials
+
+Pass credentials via environment variables or mount your `~/.aws` directory:
+
+```bash
+# Environment variables
+docker run --rm \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
+  -e AWS_SESSION_TOKEN \
+  -e AWS_DEFAULT_REGION=us-east-1 \
+  standstill check
+
+# Mounted credentials file
+docker run --rm \
+  -v "$HOME/.aws:/root/.aws:ro" \
+  -e AWS_PROFILE=my-mgmt-profile \
+  -e AWS_DEFAULT_REGION=us-east-1 \
+  standstill check
 ```
 
 ---
