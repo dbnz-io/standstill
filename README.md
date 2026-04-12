@@ -19,6 +19,39 @@ standstill is built around that operational model. It treats the desired securit
 
 ---
 
+## Account maturity model
+
+Mature AWS organizations separate account infrastructure into layers with distinct ownership
+boundaries. standstill is designed around this model: each layer has a dedicated tool and a
+dedicated team, and lower layers are treated as immutable by the layers above them.
+
+| Layer | Name | What it contains | Managed by | Owned by |
+|-------|------|-----------------|------------|----------|
+| 0 | Organization & security controls | CT controls (SCPs, detective, proactive), GuardDuty, Security Hub, Macie, Inspector, Access Analyzer, Config recorders | standstill | Security / platform team |
+| 1 | Account foundation | VPC, subnets, route tables, Transit Gateway attachment, DNS resolver rules, default security groups, break-glass IAM roles | standstill blueprints | DevOps / platform team |
+| 2 | Application infrastructure | Compute (ECS/EKS/Lambda), databases, storage, application-specific resources | Terraform / CloudFormation / CDK | Dev / DevOps teams |
+
+Layer 0 and Layer 1 are set once per account and treated as immutable by Layer 2. Application
+teams reference foundation resources via data sources or SSM Parameter Store — they never own or
+modify them. A `terraform plan` will see the VPC already exists and has no opinion about it.
+
+CloudFormation is used for Layer 1 rather than Terraform precisely because it creates a hard
+governance boundary: foundation resources do not exist in any application state file, cannot be
+drifted by a `terraform apply`, and can be protected with stack termination protection and a
+deny-delete SCP. GuardDuty, CloudTrail, and Config belong to Layer 0 — they are org-wide services
+managed centrally by standstill, not per-account Terraform resources. Application infrastructure
+has to live with both layers, which is the intended design.
+
+Layer 1 is applied via blueprints — YAML files that describe one or more CloudFormation stacks to
+deploy into a new account at creation time:
+
+```bash
+standstill blueprint apply --file blueprints/networking.yaml --account 123456789012
+standstill accounts create --name "ClientA" --email a@client.com --ou ou-xxx --blueprint blueprints/networking.yaml
+```
+
+---
+
 ## The security layers standstill manages
 
 ### Preventive controls — Service Control Policies

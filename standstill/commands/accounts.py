@@ -1,17 +1,33 @@
 from __future__ import annotations
 
-import typer
-from rich.console import Console
+import time
+from pathlib import Path
+from typing import Annotated, Optional
 
+import typer
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from standstill import state as _state
+from standstill.aws import account_factory as af_api
+from standstill.aws import blueprint as bp_api
 from standstill.aws import organizations as org_api
 from standstill.aws import session as aws_session
 from standstill.display import renderer
+from standstill.models.blueprint_config import load_blueprint
 
 app = typer.Typer(no_args_is_help=True, help="Account-level operations across the organization.")
 err = Console(stderr=True)
 
 _DEFAULT_CT_ROLE = "AWSControlTowerExecution"
+_STATUS_COLOR = {"ACTIVE": "green", "SUSPENDED": "red", "PENDING_CLOSURE": "yellow"}
 
+
+# ---------------------------------------------------------------------------
+# check-roles
+# ---------------------------------------------------------------------------
 
 @app.command("check-roles")
 def check_roles(
@@ -52,3 +68,483 @@ def check_roles(
     unreachable = sum(1 for ok, _ in results.values() if not ok)
     if unreachable:
         raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# create
+# ---------------------------------------------------------------------------
+
+@app.command("create")
+def create_account(
+    name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Account name."),
+    ],
+    email: Annotated[
+        str,
+        typer.Option("--email", "-e", help="Root email address for the new account."),
+    ],
+    ou: Annotated[
+        str,
+        typer.Option("--ou", "-u", help="Target OU ID (ou-xxxx-xxxxxxxx)."),
+    ],
+    wait: Annotated[
+        bool,
+        typer.Option("--wait/--no-wait", help="Wait for the operation to complete."),
+    ] = True,
+    timeout: Annotated[
+        int,
+        typer.Option("--timeout", help="Max seconds to wait (default 1800 = 30 min)."),
+    ] = 1800,
+    blueprint: Annotated[
+        Optional[Path],
+        typer.Option("--blueprint", "-b", help="Blueprint YAML to apply after account creation."),
+    ] = None,
+) -> None:
+    """
+    Create a new account via the Control Tower Account Factory.
+
+    Provisions the account, applies the CT baseline, and places it in the
+    target OU. Requires Control Tower 3.0+ and management-account credentials.
+    Account creation typically takes 10–30 minutes.
+
+    If --blueprint is specified, standstill will apply the blueprint's
+    CloudFormation stacks to the new account once it is ready.
+
+    \b
+    Examples:
+      standstill accounts create --name "Staging" --email stage@example.com --ou ou-ab12-34cd5678
+      standstill accounts create --name "Dev" --email dev@example.com --ou ou-ab12-34cd5678 --blueprint blueprints/net.yaml
+    """
+    if blueprint and not wait:
+        renderer.console.print(
+            "[yellow]Warning:[/yellow] --blueprint is ignored with --no-wait. "
+            "Run [bold]standstill blueprint apply[/bold] manually after the account is ready."
+        )
+        blueprint = None
+
+    renderer.console.print(
+        f"[bold]Creating account:[/bold] {name}  [dim]{email}[/dim]  → OU [cyan]{ou}[/cyan]\n"
+    )
+
+    try:
+        with renderer.console.status("[bold]Submitting account creation...[/bold]"):
+            op_id = af_api.create_managed_account(name=name, email=email, ou_id=ou)
+    except Exception as e:
+        err.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    renderer.console.print(f"[green]✓[/green] Submitted — operation [dim]{op_id}[/dim]")
+
+    if not wait:
+        renderer.console.print("[dim]Use [bold]standstill view accounts[/bold] to check when the account appears.[/dim]")
+        return
+
+    renderer.console.print("[dim]Account creation takes 10–30 minutes. Polling every 15s...[/dim]\n")
+    try:
+        result = _poll_with_progress(op_id, timeout, poll_interval=15)
+    except TimeoutError as e:
+        err.print(f"[bold yellow]Timeout:[/bold yellow] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        err.print(f"[bold red]Error during polling:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    if result.get("status") == "SUCCEEDED":
+        renderer.console.print(f"\n[bold green]✓ Account '{name}' created successfully.[/bold green]")
+        if blueprint:
+            _apply_blueprint_post_create(
+                blueprint_path=blueprint,
+                email=email,
+                ou=ou,
+                region=_state.state.region or "us-east-1",
+            )
+    else:
+        msg = result.get("statusMessage", "unknown error")
+        err.print(f"\n[bold red]✗ Account creation failed:[/bold red] {msg}")
+        raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# enroll
+# ---------------------------------------------------------------------------
+
+@app.command("enroll")
+def enroll_account(
+    account: Annotated[
+        str,
+        typer.Option("--account", "-a", help="Account ID to enroll (12-digit)."),
+    ],
+    ou: Annotated[
+        str,
+        typer.Option("--ou", "-u", help="Target OU ID (ou-xxxx-xxxxxxxx)."),
+    ],
+    wait: Annotated[
+        bool,
+        typer.Option("--wait/--no-wait", help="Wait for the operation to complete."),
+    ] = True,
+    timeout: Annotated[
+        int,
+        typer.Option("--timeout", help="Max seconds to wait (default 1800 = 30 min)."),
+    ] = 1800,
+    blueprint: Annotated[
+        Optional[Path],
+        typer.Option("--blueprint", "-b", help="Blueprint YAML to apply after enrollment."),
+    ] = None,
+) -> None:
+    """
+    Enroll an existing AWS account into Control Tower.
+
+    The account must already be a member of the organization and must not
+    currently be enrolled in Control Tower. CT applies the baseline and
+    installs the execution role. Enrollment typically takes 10–30 minutes.
+
+    If --blueprint is specified, standstill will apply the blueprint's
+    CloudFormation stacks to the account once enrollment completes.
+
+    \b
+    Examples:
+      standstill accounts enroll --account 123456789012 --ou ou-ab12-34cd5678
+      standstill accounts enroll --account 123456789012 --ou ou-ab12-34cd5678 --blueprint blueprints/net.yaml
+    """
+    if blueprint and not wait:
+        renderer.console.print(
+            "[yellow]Warning:[/yellow] --blueprint is ignored with --no-wait. "
+            "Run [bold]standstill blueprint apply[/bold] manually after enrollment completes."
+        )
+        blueprint = None
+
+    renderer.console.print(
+        f"[bold]Enrolling account[/bold] [cyan]{account}[/cyan] → OU [cyan]{ou}[/cyan]\n"
+    )
+
+    try:
+        with renderer.console.status("[bold]Submitting enrollment...[/bold]"):
+            op_id = af_api.register_managed_account(account_id=account, ou_id=ou)
+    except Exception as e:
+        err.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    renderer.console.print(f"[green]✓[/green] Submitted — operation [dim]{op_id}[/dim]")
+
+    if not wait:
+        renderer.console.print("[dim]Use [bold]standstill view accounts[/bold] to monitor enrollment.[/dim]")
+        return
+
+    renderer.console.print("[dim]Enrollment takes 10–30 minutes. Polling every 15s...[/dim]\n")
+    try:
+        result = _poll_with_progress(op_id, timeout, poll_interval=15)
+    except TimeoutError as e:
+        err.print(f"[bold yellow]Timeout:[/bold yellow] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        err.print(f"[bold red]Error during polling:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    if result.get("status") == "SUCCEEDED":
+        renderer.console.print(f"\n[bold green]✓ Account {account} enrolled successfully.[/bold green]")
+        if blueprint:
+            _run_blueprint_on_account(
+                blueprint_path=blueprint,
+                account_id=account,
+                region=_state.state.region or "us-east-1",
+            )
+    else:
+        msg = result.get("statusMessage", "unknown error")
+        err.print(f"\n[bold red]✗ Enrollment failed:[/bold red] {msg}")
+        raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# deregister
+# ---------------------------------------------------------------------------
+
+@app.command("deregister")
+def deregister_account(
+    account: Annotated[
+        str,
+        typer.Option("--account", "-a", help="Account ID to deregister (12-digit)."),
+    ],
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation prompt."),
+    ] = False,
+    wait: Annotated[
+        bool,
+        typer.Option("--wait/--no-wait", help="Wait for the operation to complete."),
+    ] = True,
+    timeout: Annotated[
+        int,
+        typer.Option("--timeout", help="Max seconds to wait (default 1800 = 30 min)."),
+    ] = 1800,
+) -> None:
+    """
+    Deregister an account from Control Tower management.
+
+    The account remains in the AWS organization but is no longer CT-governed.
+    All enrolled controls are removed and the CT execution role is deleted
+    from the account.
+
+    \b
+    Examples:
+      standstill accounts deregister --account 123456789012
+      standstill accounts deregister --account 123456789012 --yes
+    """
+    renderer.console.print(
+        f"[bold]Deregistering account[/bold] [cyan]{account}[/cyan] from Control Tower.\n"
+        "[yellow]Warning:[/yellow] This removes all CT controls and the execution role from the account.\n"
+    )
+
+    if not yes:
+        typer.confirm(f"Deregister account {account}?", abort=True)
+
+    try:
+        with renderer.console.status("[bold]Submitting deregistration...[/bold]"):
+            op_id = af_api.deregister_managed_account(account_id=account)
+    except Exception as e:
+        err.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    renderer.console.print(f"[green]✓[/green] Submitted — operation [dim]{op_id}[/dim]")
+
+    if not wait:
+        renderer.console.print("[dim]Use [bold]standstill view accounts[/bold] to monitor progress.[/dim]")
+        return
+
+    renderer.console.print("[dim]Deregistration takes 10–30 minutes. Polling every 15s...[/dim]\n")
+    try:
+        result = _poll_with_progress(op_id, timeout, poll_interval=15)
+    except TimeoutError as e:
+        err.print(f"[bold yellow]Timeout:[/bold yellow] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        err.print(f"[bold red]Error during polling:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    if result.get("status") == "SUCCEEDED":
+        renderer.console.print(f"\n[bold green]✓ Account {account} deregistered successfully.[/bold green]")
+    else:
+        msg = result.get("statusMessage", "unknown error")
+        err.print(f"\n[bold red]✗ Deregistration failed:[/bold red] {msg}")
+        raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# move
+# ---------------------------------------------------------------------------
+
+@app.command("move")
+def move_account(
+    account: Annotated[
+        str,
+        typer.Option("--account", "-a", help="Account ID to move (12-digit)."),
+    ],
+    ou: Annotated[
+        str,
+        typer.Option("--ou", "-u", help="Destination OU ID (ou-xxxx-xxxxxxxx) or root ID (r-xxxx)."),
+    ],
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation prompt."),
+    ] = False,
+) -> None:
+    """
+    Move an account to a different OU within the organization.
+
+    This is a synchronous Organizations operation. If the destination OU is
+    governed by Control Tower, CT will automatically re-baseline the account
+    in the background.
+
+    \b
+    Examples:
+      standstill accounts move --account 123456789012 --ou ou-cd34-56ef7890
+      standstill accounts move --account 123456789012 --ou ou-cd34-56ef7890 --yes
+    """
+    try:
+        with renderer.console.status("[bold]Resolving current location...[/bold]"):
+            info = af_api.describe_account(account)
+    except Exception as e:
+        err.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    current_ou = info.get("ParentId", "unknown")
+    name = info.get("Name", account)
+
+    renderer.console.print(
+        f"[bold]Moving account:[/bold] {name} ([cyan]{account}[/cyan])\n"
+        f"  From: [dim]{current_ou}[/dim]\n"
+        f"  To:   [cyan]{ou}[/cyan]\n"
+    )
+
+    if not yes:
+        typer.confirm("Proceed with move?", abort=True)
+
+    try:
+        af_api.move_account(account_id=account, dest_ou_id=ou)
+    except ValueError as e:
+        err.print(f"[bold yellow]Nothing to do:[/bold yellow] {e}")
+        return
+    except Exception as e:
+        err.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    renderer.console.print(f"[bold green]✓ Account {account} moved to {ou}.[/bold green]")
+
+
+# ---------------------------------------------------------------------------
+# describe
+# ---------------------------------------------------------------------------
+
+@app.command("describe")
+def describe_account(
+    account: Annotated[
+        str,
+        typer.Option("--account", "-a", help="Account ID (12-digit)."),
+    ],
+) -> None:
+    """
+    Show details for a specific account.
+
+    Fetches account metadata from the Organizations API: name, email,
+    status, join date, and current OU placement.
+
+    \b
+    Examples:
+      standstill accounts describe --account 123456789012
+    """
+    try:
+        with renderer.console.status("[bold]Fetching account details...[/bold]"):
+            info = af_api.describe_account(account)
+    except Exception as e:
+        err.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    _print_account_detail(info)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _run_blueprint_on_account(blueprint_path: Path, account_id: str, region: str) -> None:
+    """Load a blueprint and apply it to a known account ID. Prints results inline."""
+    try:
+        bp = load_blueprint(blueprint_path)
+    except (FileNotFoundError, ValueError) as e:
+        err.print(f"[bold yellow]Blueprint load failed:[/bold yellow] {e}")
+        err.print("[dim]Apply it manually with: standstill blueprint apply[/dim]")
+        return
+
+    renderer.console.print(f"\n[dim]Applying blueprint [bold]{bp.name}[/bold]...[/dim]")
+    results = bp_api.apply_blueprint_to_account(
+        blueprint=bp,
+        blueprint_path=blueprint_path,
+        account_id=account_id,
+        role_name=_DEFAULT_CT_ROLE,
+        region=region,
+        param_overrides={},
+        dry_run=False,
+    )
+    renderer.render_blueprint_stack_results(results)
+
+
+def _apply_blueprint_post_create(
+    blueprint_path: Path,
+    email: str,
+    ou: str,
+    region: str,
+) -> None:
+    """
+    Find the newly created account by email (with retries) then apply the blueprint.
+    Falls back gracefully if the account cannot be located.
+    """
+    renderer.console.print(
+        f"\n[dim]Locating new account by email ({email})...[/dim]"
+    )
+    account_id: str | None = None
+    for attempt in range(3):
+        account_id = af_api.find_account_by_email(email=email, ou_id=ou)
+        if account_id:
+            break
+        if attempt < 2:
+            renderer.console.print(
+                "[dim]Account not yet visible in Organizations. Retrying in 5s...[/dim]"
+            )
+            time.sleep(5)
+
+    if not account_id:
+        err.print(
+            f"[bold yellow]Warning:[/bold yellow] Could not find account with email '{email}' "
+            f"in OU {ou}. Apply blueprint manually with:\n"
+            f"  standstill blueprint apply --file {blueprint_path} --account <ACCOUNT_ID>"
+        )
+        return
+
+    renderer.console.print(f"[dim]Found account [bold]{account_id}[/bold].[/dim]")
+    _run_blueprint_on_account(
+        blueprint_path=blueprint_path,
+        account_id=account_id,
+        region=region,
+    )
+
+
+def _print_account_detail(info: dict) -> None:
+    status = info.get("Status", "UNKNOWN")
+    sc = _STATUS_COLOR.get(status, "dim")
+    joined = info.get("JoinedTimestamp", "")
+    if hasattr(joined, "strftime"):
+        joined = joined.strftime("%Y-%m-%d")
+
+    t = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
+    t.add_column("Key", style="bold cyan")
+    t.add_column("Value")
+    t.add_row("Account ID", info.get("Id", "—"))
+    t.add_row("Name", info.get("Name", "—"))
+    t.add_row("Email", info.get("Email", "—"))
+    t.add_row("Status", f"[{sc}]{status}[/{sc}]")
+    t.add_row("ARN", f"[dim]{info.get('Arn', '—')}[/dim]")
+    t.add_row("Parent OU / Root", info.get("ParentId", "—"))
+    t.add_row("Joined", str(joined) if joined else "—")
+    t.add_row("Join method", info.get("JoinedMethod", "—"))
+    renderer.console.print(Panel(t, title="[bold]Account[/bold]", expand=False))
+
+
+def _poll_with_progress(op_id: str, timeout: int, poll_interval: int = 15) -> dict:
+    """Poll an account factory operation, printing elapsed time at each interval."""
+    from botocore.exceptions import ClientError as _ClientError
+
+    from standstill import state as _state
+
+    start = time.monotonic()
+    deadline = start + timeout
+    throttle_count = 0
+
+    time.sleep(min(10, poll_interval))
+
+    while time.monotonic() < deadline:
+        try:
+            ct = _state.state.get_client("controltower")
+            resp = ct.get_landing_zone_operation(operationIdentifier=op_id)
+            op = resp.get("operationDetails", {})
+            throttle_count = 0
+            elapsed = int(time.monotonic() - start)
+            mins, secs = divmod(elapsed, 60)
+            op_type = op.get("operationType", "ACCOUNT_OPERATION")
+            renderer.console.print(
+                f"  [dim][{mins:02d}:{secs:02d}][/dim]  {op_type} — [cyan]{op.get('status', '...')}[/cyan]"
+            )
+            if op.get("status") in {"SUCCEEDED", "FAILED"}:
+                return op
+        except _ClientError as e:
+            code = e.response["Error"]["Code"]
+            if code in {"ThrottlingException", "Throttling", "RequestThrottled"}:
+                throttle_count += 1
+                time.sleep(min(poll_interval * (2 ** throttle_count), 120))
+                continue
+            raise
+        time.sleep(poll_interval)
+
+    raise TimeoutError(
+        f"Operation {op_id} did not complete within {timeout}s. "
+        "Account factory operations can take 10–30 minutes."
+    )

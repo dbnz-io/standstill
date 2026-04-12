@@ -654,5 +654,25 @@ def _print_assessment_summary(results: list[AccountAssessment], active_services:
 # JSON output
 # ---------------------------------------------------------------------------
 
+def render_blueprint_stack_results(results: list) -> None:
+    """Print a StackResult list from standstill.aws.blueprint."""
+    _ACTION_STYLE: dict[str, str] = {
+        "created": "green",
+        "updated": "cyan",
+        "skipped": "dim",
+        "dry-run": "yellow",
+        "failed": "bold red",
+    }
+    for r in results:
+        style = _ACTION_STYLE.get(r.action, "white")
+        label = r.action.upper()
+        if r.error:
+            console.print(f"  [{style}]{label}[/{style}]  {r.stack_name}  [red]{r.error}[/red]")
+        elif r.status:
+            console.print(f"  [{style}]{label}[/{style}]  {r.stack_name}  [dim]{r.status}[/dim]")
+        else:
+            console.print(f"  [{style}]{label}[/{style}]  {r.stack_name}")
+
+
 def render_json(data: object) -> None:
     console.print_json(json.dumps(data, default=str))
