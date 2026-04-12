@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
-from standstill.aws.blueprint import StackResult, apply_blueprint_to_account, deploy_stack, get_stack_status, poll_stack
+from standstill.aws.blueprint import StackResult, deploy_stack, poll_stack
 from standstill.main import app
-from standstill.models.blueprint_config import Blueprint, BlueprintStack, load_blueprint
+from standstill.models.blueprint_config import BlueprintStack, load_blueprint
 
 runner = CliRunner()
 
@@ -17,7 +17,10 @@ runner = CliRunner()
 # Helpers
 # ---------------------------------------------------------------------------
 
-_INLINE_TEMPLATE = "AWSTemplateFormatVersion: '2010-09-09'\nResources:\n  Wait:\n    Type: AWS::CloudFormation::WaitConditionHandle\n"
+_INLINE_TEMPLATE = (
+    "AWSTemplateFormatVersion: '2010-09-09'\nResources:\n"
+    "  Wait:\n    Type: AWS::CloudFormation::WaitConditionHandle\n"
+)
 
 
 def _write_blueprint(tmp_path: Path, extra: str = "") -> Path:
