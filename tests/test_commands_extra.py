@@ -198,8 +198,8 @@ targets:
             parent_id=None,
         )
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou_node]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou_node]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou_node]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou_node]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={"arn:aws:organizations:::ou/o-1/ou-ab12-34cd5678": (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
@@ -229,8 +229,8 @@ targets:
         with (
             patch("standstill.commands.apply.ct_api.load_catalog",
                   return_value={"arn:aws:controltower:us-east-1::control/AWS-GR_TEST": mock_control}),
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou_node]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou_node]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou_node]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou_node]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={"arn:aws:organizations:::ou/o-1/ou-ab12-34cd5678": (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
