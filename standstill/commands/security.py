@@ -253,7 +253,10 @@ def init(
             ecr = typer.confirm("  Enable ECR image scanning?", default=sc.ecr          if sc else True)
             console.print("[dim]  ⚠  Lambda scanning adds cost per function per month.[/dim]")
             lam      = typer.confirm("  Enable Lambda scanning?",      default=sc.lambda_functions if sc else False)
-            lam_code = typer.confirm("  Enable Lambda code scanning?", default=sc.lambda_code      if sc else False) if lam else False
+            lam_code = (
+                typer.confirm("  Enable Lambda code scanning?", default=sc.lambda_code if sc else False)
+                if lam else False
+            )
             services["inspector"].update({
                 "organization": {"auto_enable": True},
                 "scan_types": {"ec2": ec2, "ecr": ecr, "lambda": lam, "lambda_code": lam_code},
