@@ -441,8 +441,8 @@ class TestApplyExtended:
         catalog = _make_control("DETECTIVE")
         with (
             patch("standstill.commands.apply.ct_api.load_catalog", return_value=catalog),
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
@@ -460,8 +460,8 @@ class TestApplyExtended:
             f.write(f_content)
             fpath = f.name
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (False, "No baseline enrolled")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
@@ -485,8 +485,8 @@ class TestApplyExtended:
             f.write(f"targets:\n  - ou_id: ou-ab12-99zz9999\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[]),
         ):
             result = runner.invoke(app, ["apply", "--file", fpath])
         pathlib.Path(fpath).unlink(missing_ok=True)
@@ -502,8 +502,8 @@ class TestApplyExtended:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous",
@@ -522,15 +522,15 @@ class TestApplyExtended:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
             patch("standstill.commands.apply.ct_api.enable_control", return_value="op-nowait-1"),
             patch("standstill.commands.apply.ct_api.save_pending_operation"),
         ):
-            result = runner.invoke(app, ["apply", "--file", fpath, "--no-wait"])
+            result = runner.invoke(app, ["apply", "--file", fpath, "--no-wait", "--yes"])
         pathlib.Path(fpath).unlink(missing_ok=True)
         assert result.exit_code == 0
         assert "submitted" in result.output
@@ -542,8 +542,8 @@ class TestApplyExtended:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
@@ -553,7 +553,7 @@ class TestApplyExtended:
                   return_value={"status": "SUCCEEDED"}),
             patch("standstill.commands.apply.ct_api.remove_pending_operation"),
         ):
-            result = runner.invoke(app, ["apply", "--file", fpath])
+            result = runner.invoke(app, ["apply", "--file", fpath, "--yes"])
         pathlib.Path(fpath).unlink(missing_ok=True)
         assert result.exit_code == 0
         assert "successfully" in result.output
@@ -565,8 +565,8 @@ class TestApplyExtended:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
@@ -575,7 +575,7 @@ class TestApplyExtended:
             patch("standstill.commands.apply.ct_api.poll_operation",
                   return_value={"status": "FAILED", "statusMessage": "control conflict"}),
         ):
-            result = runner.invoke(app, ["apply", "--file", fpath])
+            result = runner.invoke(app, ["apply", "--file", fpath, "--yes"])
         pathlib.Path(fpath).unlink(missing_ok=True)
         assert result.exit_code == 1
 
@@ -586,8 +586,8 @@ class TestApplyExtended:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
@@ -596,7 +596,7 @@ class TestApplyExtended:
             patch("standstill.commands.apply.ct_api.poll_operation",
                   side_effect=SessionExpiredError("op-exp-1")),
         ):
-            result = runner.invoke(app, ["apply", "--file", fpath])
+            result = runner.invoke(app, ["apply", "--file", fpath, "--yes"])
         pathlib.Path(fpath).unlink(missing_ok=True)
         assert result.exit_code == 1
         assert "expired" in result.output.lower() or "journal" in result.output.lower()
@@ -608,8 +608,8 @@ class TestApplyExtended:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
@@ -619,7 +619,7 @@ class TestApplyExtended:
                       "EnableControl"
                   )),
         ):
-            result = runner.invoke(app, ["apply", "--file", fpath, "--no-wait"])
+            result = runner.invoke(app, ["apply", "--file", fpath, "--no-wait", "--yes"])
         pathlib.Path(fpath).unlink(missing_ok=True)
         assert result.exit_code == 1
 
@@ -630,8 +630,8 @@ class TestApplyExtended:
             f.write(f"targets:\n  - ou_id: {ou.id}\n    controls:\n      - {ctrl_arn}\n")
             fpath = f.name
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous", return_value={}),
@@ -640,7 +640,7 @@ class TestApplyExtended:
             patch("standstill.commands.apply.ct_api.poll_operation",
                   side_effect=TimeoutError("timed out")),
         ):
-            result = runner.invoke(app, ["apply", "--file", fpath])
+            result = runner.invoke(app, ["apply", "--file", fpath, "--yes"])
         pathlib.Path(fpath).unlink(missing_ok=True)
         assert result.exit_code == 1
 

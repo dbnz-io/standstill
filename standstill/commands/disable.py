@@ -9,7 +9,7 @@ from rich.console import Console
 from standstill import state as _state
 from standstill.aws import controltower as ct_api
 from standstill.aws import organizations as org_api
-from standstill.commands.apply import (
+from standstill.commands._engine import (
     _interactive_picker,
     _plan_from_file,
     _run_apply,
@@ -26,19 +26,19 @@ def disable(
     ] = None,
     disable_all: Annotated[
         bool,
-        typer.Option("--all", help="Disable all currently enabled controls on --ou."),
+        typer.Option("--disable-all", help="Disable all currently enabled controls on --ou."),
     ] = False,
     disable_preventive: Annotated[
         bool,
-        typer.Option("--preventive", help="Disable all currently enabled Preventive controls on --ou."),
+        typer.Option("--disable-preventive", help="Disable all currently enabled Preventive controls on --ou."),
     ] = False,
     disable_detective: Annotated[
         bool,
-        typer.Option("--detective", help="Disable all currently enabled Detective controls on --ou."),
+        typer.Option("--disable-detective", help="Disable all currently enabled Detective controls on --ou."),
     ] = False,
     disable_proactive: Annotated[
         bool,
-        typer.Option("--proactive", help="Disable all currently enabled Proactive controls on --ou."),
+        typer.Option("--disable-proactive", help="Disable all currently enabled Proactive controls on --ou."),
     ] = False,
     category: Annotated[
         bool,
@@ -54,6 +54,10 @@ def disable(
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Print the plan without making any changes."),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation prompt."),
     ] = False,
     wait: Annotated[
         bool,
@@ -74,11 +78,11 @@ def disable(
     \b
     Modes:
       standstill disable --file controls.yaml
-      standstill disable --all         --ou ou-xxxx-yyyy
-      standstill disable --preventive  --ou ou-xxxx-yyyy
-      standstill disable --detective   --ou ou-xxxx-yyyy
-      standstill disable --proactive   --ou ou-xxxx-yyyy
-      standstill disable --category    --ou ou-xxxx-yyyy
+      standstill disable --disable-all         --ou ou-xxxx-yyyy
+      standstill disable --disable-preventive  --ou ou-xxxx-yyyy
+      standstill disable --disable-detective   --ou ou-xxxx-yyyy
+      standstill disable --disable-proactive   --ou ou-xxxx-yyyy
+      standstill disable --category            --ou ou-xxxx-yyyy
     """
     behavior_flags = {
         "PREVENTIVE": disable_preventive,
@@ -92,17 +96,17 @@ def disable(
     if mode_count > 1:
         err.print(
             "[bold red]Error:[/bold red] "
-            "--file, --all, --<behavior>, and --category are mutually exclusive."
+            "--file, --disable-all, --disable-<behavior>, and --category are mutually exclusive."
         )
         raise typer.Exit(1)
     if mode_count == 0:
         err.print(
             "[bold red]Error:[/bold red] "
-            "Provide --file, --all, --<behavior>, or --category."
+            "Provide --file, --disable-all, --disable-<behavior>, or --category."
         )
         raise typer.Exit(1)
     if ou_mode and not ou:
-        err.print("[bold red]Error:[/bold red] --all, --<behavior>, and --category require --ou <OU_ID>.")
+        err.print("[bold red]Error:[/bold red] --disable-all, --disable-<behavior>, and --category require --ou <OU_ID>.")
         raise typer.Exit(1)
 
     if not 1 <= concurrency <= 50:
@@ -117,7 +121,7 @@ def disable(
     else:
         planned = _plan_from_enabled(
             ou_id=ou,  # type: ignore[arg-type]
-            behaviors=active_behaviors if active_behaviors else (None if disable_all else None),
+            behaviors=active_behaviors if active_behaviors else None,
             filter_all=disable_all,
             use_category=category,
             region=region,
@@ -135,6 +139,7 @@ def disable(
         region=region,
         action=ct_api.disable_control,
         action_label="disable",
+        yes=yes,
     )
 
 
@@ -195,7 +200,7 @@ def _plan_from_enabled(
     if unknown_arns and not use_category:
         console.print(
             f"[dim]{len(unknown_arns)} enabled control(s) not in catalog "
-            "(skipped — use --all to include them)[/dim]"
+            "(skipped — use --disable-all to include them)[/dim]"
         )
 
     if use_category:

@@ -41,17 +41,17 @@ class TestDisableCommand:
         assert "Provide" in result.output
 
     def test_mutually_exclusive_flags(self):
-        result = runner.invoke(app, ["disable", "--all", "--detective", "--ou", "ou-ab12-34cd5678"])
+        result = runner.invoke(app, ["disable", "--disable-all", "--disable-detective", "--ou", "ou-ab12-34cd5678"])
         assert result.exit_code == 1
-        assert "mutually exclusive" in result.output
+        assert "mutually" in result.output
 
     def test_all_requires_ou(self):
-        result = runner.invoke(app, ["disable", "--all"])
+        result = runner.invoke(app, ["disable", "--disable-all"])
         assert result.exit_code == 1
         assert "require" in result.output
 
     def test_concurrency_out_of_range(self):
-        result = runner.invoke(app, ["disable", "--all", "--ou", "ou-ab12-34cd5678", "--concurrency", "100"])
+        result = runner.invoke(app, ["disable", "--disable-all", "--ou", "ou-ab12-34cd5678", "--concurrency", "100"])
         assert result.exit_code == 1
         assert "concurrency" in result.output
 
@@ -64,7 +64,7 @@ class TestDisableCommand:
             patch("standstill.commands.disable.org_api.build_ou_tree", return_value=[]),
             patch("standstill.commands.disable.org_api.flatten_ous", return_value=[]),
         ):
-            result = runner.invoke(app, ["disable", "--all", "--ou", "ou-notexist"])
+            result = runner.invoke(app, ["disable", "--disable-all", "--ou", "ou-notexist"])
         assert result.exit_code == 1
         assert "OU not found" in result.output
 
@@ -75,7 +75,7 @@ class TestDisableCommand:
             patch("standstill.commands.disable.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.disable.ct_api.list_enabled_for_ou", return_value=[]),
         ):
-            result = runner.invoke(app, ["disable", "--all", "--ou", "ou-ab12-34cd5678"])
+            result = runner.invoke(app, ["disable", "--disable-all", "--ou", "ou-ab12-34cd5678"])
         assert result.exit_code == 0
         assert "No controls" in result.output
 
@@ -86,14 +86,14 @@ class TestDisableCommand:
             patch("standstill.commands.disable.org_api.build_ou_tree", return_value=[ou]),
             patch("standstill.commands.disable.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.disable.ct_api.list_enabled_for_ou", return_value=enabled),
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous",
                   return_value={ou.arn: enabled}),
         ):
-            result = runner.invoke(app, ["disable", "--all", "--ou", "ou-ab12-34cd5678", "--dry-run"])
+            result = runner.invoke(app, ["disable", "--disable-all", "--ou", "ou-ab12-34cd5678", "--dry-run"])
         assert result.exit_code == 0
         assert "Dry" in result.output
 
@@ -107,15 +107,15 @@ class TestDisableCommand:
             patch("standstill.commands.disable.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.disable.ct_api.list_enabled_for_ou", return_value=enabled),
             patch("standstill.commands.disable.ct_api.load_catalog", return_value=catalog),
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous",
                   return_value={ou.arn: enabled}),
         ):
             result = runner.invoke(
-                app, ["disable", "--detective", "--ou", "ou-ab12-34cd5678", "--dry-run"]
+                app, ["disable", "--disable-detective", "--ou", "ou-ab12-34cd5678", "--dry-run"]
             )
         assert result.exit_code == 0
 
@@ -128,8 +128,8 @@ class TestDisableCommand:
         )
         enabled = [_make_enabled(ctrl_arn)]
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             patch("standstill.commands.apply.ct_api.list_enabled_for_all_ous",
@@ -148,8 +148,8 @@ class TestDisableCommand:
             fpath = f.name
 
         with (
-            patch("standstill.commands.apply.org_api.build_ou_tree", return_value=[ou]),
-            patch("standstill.commands.apply.org_api.flatten_ous", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.build_ou_tree", return_value=[ou]),
+            patch("standstill.commands._engine.org_api.flatten_ous", return_value=[ou]),
             patch("standstill.commands.apply.ct_api.check_baselines_for_ous",
                   return_value={ou.arn: (True, "ok")}),
             # Control is NOT in enabled set → nothing to disable

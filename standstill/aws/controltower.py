@@ -408,6 +408,25 @@ def load_pending_operations() -> list[dict]:
     return yaml.safe_load(_PENDING_OPS_PATH.read_text()) or []
 
 
+def get_operation_status(operation_id: str) -> dict:
+    """Fetch the current status of a Control Tower operation from the live API."""
+    ct = _state.state.get_client("controltower")
+    resp = ct.get_control_operation(operationIdentifier=operation_id)
+    return resp["controlOperation"]
+
+
+def clear_all_pending_operations() -> int:
+    """Remove all entries from the pending operations journal. Returns the count cleared."""
+    with _pending_ops_lock:
+        if not _PENDING_OPS_PATH.exists():
+            return 0
+        ops: list[dict] = yaml.safe_load(_PENDING_OPS_PATH.read_text()) or []
+        count = len(ops)
+        _PENDING_OPS_PATH.write_text(yaml.dump([], default_flow_style=False))
+        _PENDING_OPS_PATH.chmod(0o600)
+        return count
+
+
 # ---------------------------------------------------------------------------
 # Mutations
 # ---------------------------------------------------------------------------

@@ -52,14 +52,15 @@ def operations_list() -> None:
 @app.command("check")
 def operations_check(
     clear_completed: bool = typer.Option(
-        True,
+        False,
         "--clear/--no-clear",
         help="Remove SUCCEEDED/FAILED operations from the journal after checking.",
     ),
 ) -> None:
     """
     Poll the current status of all pending operations from the journal.
-    Refreshes statuses live from the CT API.
+    Refreshes statuses live from the CT API. Pass --clear to remove completed
+    operations from the journal once checked.
     """
     ops = ct_api.load_pending_operations()
     if not ops:
@@ -77,13 +78,11 @@ def operations_check(
     t.add_column("Message", style="dim")
 
     resolved: list[str] = []
-    ct = ct_api._state.state.get_client("controltower")
 
     for op in ops:
         op_id = op.get("operation_id", "")
         try:
-            resp = ct.get_control_operation(operationIdentifier=op_id)
-            live_op = resp["controlOperation"]
+            live_op = ct_api.get_operation_status(op_id)
             status = live_op.get("status", "UNKNOWN")
             message = live_op.get("statusMessage", "")
         except Exception as e:
@@ -114,14 +113,10 @@ def operations_check(
 @app.command("clear")
 def operations_clear() -> None:
     """Remove all entries from the pending operations journal."""
-    import yaml
-
-    from standstill.aws.controltower import _PENDING_OPS_PATH
-
     ops = ct_api.load_pending_operations()
     if not ops:
         console.print("[dim]Journal is already empty.[/dim]")
         return
 
-    _PENDING_OPS_PATH.write_text(yaml.dump([], default_flow_style=False))
-    console.print(f"[green]Cleared {len(ops)} operation(s) from the journal.[/green]")
+    count = ct_api.clear_all_pending_operations()
+    console.print(f"[green]Cleared {count} operation(s) from the journal.[/green]")

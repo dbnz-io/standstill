@@ -311,8 +311,8 @@ _SVC_LABELS_IMPORT = {
 }
 
 
-@app.command("import")
-def import_cmd(
+@app.command("pull")
+def pull_cmd(
     output: Annotated[
         Path,
         typer.Option("--output", "-o", help="Path for the generated config file."),
@@ -331,10 +331,15 @@ def import_cmd(
     ] = False,
 ) -> None:
     """
-    Generate a config file from the live state of your AWS security services.
+    Snapshot live security service config into a local YAML file.
 
     Reads the current configuration of each service from the delegated admin
     account and writes it as a YAML file ready for use with 'security apply'.
+
+    \b
+    Use this to bring an existing deployment under standstill management:
+      standstill security pull --account 123456789012
+      standstill security apply --file security_services.yaml --dry-run
     """
     console = renderer.console
 
@@ -394,7 +399,7 @@ def import_cmd(
     # ── Write file ───────────────────────────────────────────────────────────
     header = (
         "# Standstill — Security Services Configuration\n"
-        f"# Imported from account {delegated_admin} (region {region})\n"
+        f"# Pulled from account {delegated_admin} (region {region})\n"
         "# Apply:   standstill security apply --file security_services.yaml\n"
         "# Dry run: standstill security apply --file security_services.yaml --dry-run\n"
         "# Status:  standstill security status --file security_services.yaml\n\n"
@@ -512,6 +517,12 @@ def status(
 
     Reads Phase 1 info (delegation) from the management account and
     Phase 2 info (service config) from the delegated admin account.
+
+    \b
+    Delegated admin account is resolved in this order:
+      1. --account flag
+      2. --file (reads delegated_admin_account from the YAML)
+      3. Stored config (standstill config set-delegated-admin)
     """
     # Resolve delegated admin account: explicit flag → file → stored config
     delegated_admin: str | None = account
