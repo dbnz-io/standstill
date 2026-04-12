@@ -238,24 +238,28 @@ Run `standstill check` after installation to verify connectivity and permissions
 git clone https://github.com/dbnz-io/standstill
 cd standstill && pip install -e .
 
-# 2. Verify connectivity
-standstill --profile my-mgmt-profile --region us-east-1 check
+# 2. Configure your management account profile (stored in ~/.standstill/config.yaml)
+standstill config set-profile my-mgmt-profile
+standstill config set-delegated-admin 123456789012   # your security tooling account
 
-# 3. Explore your org
+# 3. Verify connectivity
+standstill check
+
+# 4. Explore your org
 standstill view ous
 standstill view accounts
 
-# 4. Verify execution roles are reachable in all accounts
+# 5. Verify execution roles are reachable in all accounts
 standstill accounts check-roles
 
-# 5. Ensure Config recorders are running everywhere (required for detective controls)
+# 6. Ensure Config recorders are running everywhere (required for detective controls)
 standstill recorder status --all
 standstill recorder setup  --all
 
-# 6. Dry-run before applying anything
+# 7. Dry-run before applying anything
 standstill apply --file examples/controls.yaml --dry-run
 
-# 7. Apply
+# 8. Apply
 standstill apply --file examples/controls.yaml
 ```
 
@@ -328,6 +332,31 @@ standstill [--profile PROFILE] [--region REGION] [--output table|json] COMMAND
   recorder types reset                       Revert to bundled Security Hub defaults
 
   accounts check-roles [--role-name NAME]    Verify CT execution role in every account
+  accounts list                              List all accounts with OU membership and status
+  accounts describe --account ID             Show account details and parent OU
+  accounts create --name N --email E --ou OU Create a new account via CT Account Factory
+    --blueprint FILE                         Apply a blueprint after the account is ready
+    --no-wait                                Submit and return immediately (skips blueprint)
+  accounts enroll --account ID --ou OU       Enroll an existing account into Control Tower
+    --blueprint FILE                         Apply a blueprint after enrollment completes
+    --no-wait                                Submit and return immediately (skips blueprint)
+  accounts deregister --account ID           Deregister an account from Control Tower
+  accounts move --account ID --ou OU         Move an account to a different OU
+
+  ou create --parent ID --name NAME          Create a new OU
+  ou delete --ou OU                          Delete an empty OU
+  ou rename --ou OU --name NAME              Rename an OU
+  ou describe --ou OU                        Show OU details, child OUs, and accounts
+
+  blueprint list                             List blueprints in ~/.standstill/blueprints/
+  blueprint validate --file FILE             Validate a blueprint YAML without deploying
+  blueprint apply --file FILE                Apply a blueprint to accounts
+    --account ACCOUNT_ID                     Target a single account
+    --ou OU_ID                               Target all active accounts in an OU
+    --dry-run                                Preview stacks without deploying
+    --param KEY=VALUE                        Override a parameter (repeatable)
+    --role-name NAME                         IAM role to assume (default: AWSControlTowerExecution)
+    --yes / -y                               Skip confirmation prompt
 
   lz status                      Show landing zone status, version, and drift state
   lz reset                       Remediate landing zone drift
