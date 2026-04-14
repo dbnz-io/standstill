@@ -286,7 +286,72 @@ class TestPollStack:
 
 
 # ===========================================================================
-# Group 5: blueprint list command
+# Group 5: blueprint init command
+# ===========================================================================
+
+class TestBlueprintInitCommand:
+    def test_creates_file_with_default_name(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "standstill.commands.blueprint._BLUEPRINTS_DIR", tmp_path / "blueprints"
+        )
+        result = runner.invoke(app, ["blueprint", "init"])
+        assert result.exit_code == 0
+        dest = tmp_path / "blueprints" / "my-blueprint.yaml"
+        assert dest.exists()
+        assert "my-blueprint" in dest.read_text()
+
+    def test_creates_file_with_custom_name(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "standstill.commands.blueprint._BLUEPRINTS_DIR", tmp_path / "blueprints"
+        )
+        result = runner.invoke(app, ["blueprint", "init", "--name", "networking"])
+        assert result.exit_code == 0
+        dest = tmp_path / "blueprints" / "networking.yaml"
+        assert dest.exists()
+        assert "networking" in dest.read_text()
+
+    def test_creates_file_at_custom_output(self, tmp_path):
+        dest = tmp_path / "custom.yaml"
+        result = runner.invoke(app, ["blueprint", "init", "--output", str(dest)])
+        assert result.exit_code == 0
+        assert dest.exists()
+
+    def test_fails_if_file_exists_without_force(self, tmp_path):
+        dest = tmp_path / "exists.yaml"
+        dest.write_text("old content")
+        result = runner.invoke(app, ["blueprint", "init", "--output", str(dest)])
+        assert result.exit_code == 1
+        assert dest.read_text() == "old content"
+
+    def test_force_overwrites_existing_file(self, tmp_path):
+        dest = tmp_path / "exists.yaml"
+        dest.write_text("old content")
+        result = runner.invoke(app, ["blueprint", "init", "--output", str(dest), "--force"])
+        assert result.exit_code == 0
+        assert "old content" not in dest.read_text()
+
+    def test_creates_parent_dirs(self, tmp_path):
+        dest = tmp_path / "nested" / "dir" / "bp.yaml"
+        result = runner.invoke(app, ["blueprint", "init", "--output", str(dest)])
+        assert result.exit_code == 0
+        assert dest.exists()
+
+    def test_generated_blueprint_is_valid(self, tmp_path):
+        dest = tmp_path / "bp.yaml"
+        runner.invoke(app, ["blueprint", "init", "--output", str(dest)])
+        from standstill.models.blueprint_config import load_blueprint
+        bp = load_blueprint(dest)
+        assert bp.name == "my-blueprint"
+        assert len(bp.stacks) == 1
+
+    def test_prints_created_path(self, tmp_path):
+        dest = tmp_path / "bp.yaml"
+        result = runner.invoke(app, ["blueprint", "init", "--output", str(dest)])
+        assert str(dest) in result.output
+
+
+# ===========================================================================
+# Group 6: blueprint list command
 # ===========================================================================
 
 class TestBlueprintListCommand:
@@ -674,3 +739,203 @@ class TestFindAccountByEmail:
             result = find_account_by_email("page2@example.com", "ou-ab12-34cd5678")
         assert result == "222222222222"
         assert mock_org.list_accounts_for_parent.call_count == 2
+
+
+# ===========================================================================
+# Group 11: create_ct_execution_role (unit)
+# ===========================================================================
+
+class TestCreateCtExecutionRole:
+    from botocore.exceptions import ClientError as _CE
+
+    def _iam(self, *, role_arn: str = "arn:aws:iam::999999999999:role/AWSControlTowerExecution"):
+        m = MagicMock()
+        m.create_role.return_value = {"Role": {"Arn": role_arn}}
+        return m
+
+    def test_creates_role_and_attaches_policy(self):
+        from standstill.aws.blueprint import create_ct_execution_role
+        iam = self._iam()
+        result = create_ct_execution_role(iam, "123456789012")
+        assert result["action"] == "created"
+        assert "AWSControlTowerExecution" in result["role_arn"]
+        iam.create_role.assert_called_once()
+        iam.attach_role_policy.assert_called_once_with(
+            RoleName="AWSControlTowerExecution",
+            PolicyArn="arn:aws:iam::aws:policy/AdministratorAccess",
+        )
+
+    def test_trust_policy_contains_management_account(self):
+        import json
+        from standstill.aws.blueprint import create_ct_execution_role
+        iam = self._iam()
+        create_ct_execution_role(iam, "123456789012")
+        _, kwargs = iam.create_role.call_args
+        trust = json.loads(kwargs["AssumeRolePolicyDocument"])
+        principal = trust["Statement"][0]["Principal"]["AWS"]
+        assert "123456789012" in principal
+
+    def test_custom_role_name(self):
+        from standstill.aws.blueprint import create_ct_execution_role
+        iam = self._iam(role_arn="arn:aws:iam::999:role/MyCustomRole")
+        result = create_ct_execution_role(iam, "123456789012", role_name="MyCustomRole")
+        assert result["action"] == "created"
+        _, kwargs = iam.create_role.call_args
+        assert kwargs["RoleName"] == "MyCustomRole"
+
+    def test_returns_exists_when_role_already_present(self):
+        from botocore.exceptions import ClientError
+        from standstill.aws.blueprint import create_ct_execution_role
+        iam = MagicMock()
+        iam.create_role.side_effect = ClientError(
+            {"Error": {"Code": "EntityAlreadyExists", "Message": "already exists"}},
+            "CreateRole",
+        )
+        iam.get_role.return_value = {
+            "Role": {"Arn": "arn:aws:iam::999999999999:role/AWSControlTowerExecution"}
+        }
+        result = create_ct_execution_role(iam, "123456789012")
+        assert result["action"] == "exists"
+        assert "AWSControlTowerExecution" in result["role_arn"]
+        iam.attach_role_policy.assert_not_called()
+
+    def test_raises_on_unexpected_iam_error(self):
+        from botocore.exceptions import ClientError
+        from standstill.aws.blueprint import create_ct_execution_role
+        iam = MagicMock()
+        iam.create_role.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "not authorized"}},
+            "CreateRole",
+        )
+        with pytest.raises(RuntimeError, match="not authorized"):
+            create_ct_execution_role(iam, "123456789012")
+
+    def test_raises_when_policy_attach_fails(self):
+        from botocore.exceptions import ClientError
+        from standstill.aws.blueprint import create_ct_execution_role
+        iam = self._iam()
+        iam.attach_role_policy.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "cannot attach"}},
+            "AttachRolePolicy",
+        )
+        with pytest.raises(RuntimeError, match="AdministratorAccess"):
+            create_ct_execution_role(iam, "123456789012")
+
+
+# ===========================================================================
+# Group 12: blueprint bootstrap-role command
+# ===========================================================================
+
+class TestBlueprintBootstrapRoleCommand:
+    _IDENTITY = {
+        "Account": "999999999999",
+        "Arn": "arn:aws:iam::999999999999:user/admin",
+        "UserId": "AIDXXXXX",
+    }
+    _ROLE_ARN = "arn:aws:iam::999999999999:role/AWSControlTowerExecution"
+
+    def _patch_state(self, sts_identity=None, create_result=None):
+        sts_mock = MagicMock()
+        sts_mock.get_caller_identity.return_value = sts_identity or self._IDENTITY
+        iam_mock = MagicMock()
+
+        clients = {"sts": sts_mock, "iam": iam_mock}
+
+        def _get_client(service, **_kw):
+            return clients[service]
+
+        return _get_client, iam_mock
+
+    def test_creates_role_successfully(self):
+        get_client, iam_mock = self._patch_state()
+        iam_mock.create_role.return_value = {"Role": {"Arn": self._ROLE_ARN}}
+        with patch("standstill.commands.blueprint._state.state.get_client", side_effect=get_client):
+            result = runner.invoke(app, [
+                "blueprint", "bootstrap-role",
+                "--management-account", "123456789012",
+                "--yes",
+            ])
+        assert result.exit_code == 0
+        assert "created" in result.output.lower()
+        assert self._ROLE_ARN in result.output
+
+    def test_reports_existing_role(self):
+        from botocore.exceptions import ClientError
+        get_client, iam_mock = self._patch_state()
+        iam_mock.create_role.side_effect = ClientError(
+            {"Error": {"Code": "EntityAlreadyExists", "Message": "exists"}}, "CreateRole"
+        )
+        iam_mock.get_role.return_value = {"Role": {"Arn": self._ROLE_ARN}}
+        with patch("standstill.commands.blueprint._state.state.get_client", side_effect=get_client):
+            result = runner.invoke(app, [
+                "blueprint", "bootstrap-role",
+                "--management-account", "123456789012",
+                "--yes",
+            ])
+        assert result.exit_code == 0
+        assert "already exists" in result.output.lower()
+
+    def test_shows_target_and_management_account_before_confirm(self):
+        get_client, iam_mock = self._patch_state()
+        iam_mock.create_role.return_value = {"Role": {"Arn": self._ROLE_ARN}}
+        with patch("standstill.commands.blueprint._state.state.get_client", side_effect=get_client):
+            result = runner.invoke(app, [
+                "blueprint", "bootstrap-role",
+                "--management-account", "123456789012",
+                "--yes",
+            ])
+        assert "999999999999" in result.output   # target account
+        assert "123456789012" in result.output   # management account
+
+    def test_confirm_prompt_aborts_on_no(self):
+        get_client, iam_mock = self._patch_state()
+        with patch("standstill.commands.blueprint._state.state.get_client", side_effect=get_client):
+            result = runner.invoke(app, [
+                "blueprint", "bootstrap-role",
+                "--management-account", "123456789012",
+            ], input="n\n")
+        assert result.exit_code != 0
+        iam_mock.create_role.assert_not_called()
+
+    def test_iam_error_exits_1(self):
+        from botocore.exceptions import ClientError
+        get_client, iam_mock = self._patch_state()
+        iam_mock.create_role.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Denied"}}, "CreateRole"
+        )
+        with patch("standstill.commands.blueprint._state.state.get_client", side_effect=get_client):
+            result = runner.invoke(app, [
+                "blueprint", "bootstrap-role",
+                "--management-account", "123456789012",
+                "--yes",
+            ])
+        assert result.exit_code == 1
+
+    def test_sts_failure_exits_1(self):
+        sts_mock = MagicMock()
+        sts_mock.get_caller_identity.side_effect = Exception("no credentials")
+        with patch(
+            "standstill.commands.blueprint._state.state.get_client",
+            return_value=sts_mock,
+        ):
+            result = runner.invoke(app, [
+                "blueprint", "bootstrap-role",
+                "--management-account", "123456789012",
+                "--yes",
+            ])
+        assert result.exit_code == 1
+
+    def test_custom_role_name_passed_through(self):
+        get_client, iam_mock = self._patch_state()
+        iam_mock.create_role.return_value = {
+            "Role": {"Arn": "arn:aws:iam::999999999999:role/MyRole"}
+        }
+        with patch("standstill.commands.blueprint._state.state.get_client", side_effect=get_client):
+            runner.invoke(app, [
+                "blueprint", "bootstrap-role",
+                "--management-account", "123456789012",
+                "--role-name", "MyRole",
+                "--yes",
+            ])
+        _, kwargs = iam_mock.create_role.call_args
+        assert kwargs["RoleName"] == "MyRole"

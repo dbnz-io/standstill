@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -189,6 +190,75 @@ def poll_stack(
         f"Stack '{stack_name}' did not complete within {timeout}s "
         f"(last status: {last})."
     )
+
+
+# ---------------------------------------------------------------------------
+# IAM role bootstrap
+# ---------------------------------------------------------------------------
+
+_ADMIN_POLICY_ARN = "arn:aws:iam::aws:policy/AdministratorAccess"
+
+
+def create_ct_execution_role(
+    iam_client,
+    management_account_id: str,
+    role_name: str = "AWSControlTowerExecution",
+) -> dict:
+    """
+    Create the AWSControlTowerExecution IAM role in the target account.
+
+    Trust policy: allows arn:aws:iam::<management_account_id>:root to assume the role.
+    AdministratorAccess is attached immediately after creation, as required by the
+    Control Tower enrollment documentation.
+
+    Returns:
+        {"action": "created", "role_arn": "..."}   — role was created.
+        {"action": "exists",  "role_arn": "..."}   — role already existed (unchanged).
+
+    Raises RuntimeError for unexpected IAM errors.
+    """
+    trust_policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Principal": {"AWS": f"arn:aws:iam::{management_account_id}:root"},
+                "Action": "sts:AssumeRole",
+            }
+        ],
+    }
+
+    try:
+        resp = iam_client.create_role(
+            RoleName=role_name,
+            AssumeRolePolicyDocument=json.dumps(trust_policy),
+            Description=(
+                "Grants AWS Control Tower administrative access to manage this account. "
+                "Created by standstill."
+            ),
+            Tags=[{"Key": "ManagedBy", "Value": "standstill"}],
+        )
+        role_arn: str = resp["Role"]["Arn"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "EntityAlreadyExists":
+            existing = iam_client.get_role(RoleName=role_name)
+            return {"action": "exists", "role_arn": existing["Role"]["Arn"]}
+        raise RuntimeError(
+            f"Failed to create role '{role_name}': {e.response['Error']['Message']}"
+        ) from e
+
+    try:
+        iam_client.attach_role_policy(
+            RoleName=role_name,
+            PolicyArn=_ADMIN_POLICY_ARN,
+        )
+    except ClientError as e:
+        raise RuntimeError(
+            f"Role '{role_name}' was created but AdministratorAccess could not be attached: "
+            f"{e.response['Error']['Message']}"
+        ) from e
+
+    return {"action": "created", "role_arn": role_arn}
 
 
 # ---------------------------------------------------------------------------

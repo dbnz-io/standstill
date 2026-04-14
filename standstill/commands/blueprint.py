@@ -20,6 +20,153 @@ err = Console(stderr=True)
 _DEFAULT_CT_ROLE = "AWSControlTowerExecution"
 _BLUEPRINTS_DIR = Path.home() / ".standstill" / "blueprints"
 
+_STARTER_BLUEPRINT = """\
+name: {name}
+version: "1"
+description: "Starter blueprint — edit stacks below to match your needs."
+
+stacks:
+  - stack_name: example-stack
+    region: us-east-1
+    termination_protection: true
+    capabilities: []
+    parameters: {{}}
+    tags:
+      ManagedBy: standstill
+    template: |
+      AWSTemplateFormatVersion: "2010-09-09"
+      Description: "Example CloudFormation stack created by standstill blueprint init."
+      Resources:
+        Placeholder:
+          Type: AWS::CloudFormation::WaitConditionHandle
+"""
+
+
+# ---------------------------------------------------------------------------
+# init
+# ---------------------------------------------------------------------------
+
+@app.command("init")
+def init_blueprint(
+    name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Blueprint name written into the YAML."),
+    ] = "my-blueprint",
+    output: Annotated[
+        Optional[Path],
+        typer.Option("--output", "-o", help="Destination file path. Defaults to ~/.standstill/blueprints/<name>.yaml."),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite if the file already exists."),
+    ] = False,
+) -> None:
+    """
+    Create a starter blueprint YAML file.
+
+    Writes a minimal, commented blueprint to ~/.standstill/blueprints/<name>.yaml
+    (or --output) so you have a working starting point to customise.
+
+    \b
+    Examples:
+      standstill blueprint init
+      standstill blueprint init --name networking --output blueprints/net.yaml
+    """
+    dest: Path = output or (_BLUEPRINTS_DIR / f"{name}.yaml")
+
+    if dest.exists() and not force:
+        err.print(
+            f"[bold red]Error:[/bold red] '{dest}' already exists. "
+            "Use --force to overwrite."
+        )
+        raise typer.Exit(1)
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(_STARTER_BLUEPRINT.format(name=name), encoding="utf-8")
+    renderer.console.print(f"[bold green]✓ Blueprint created:[/bold green] {dest}")
+
+
+# ---------------------------------------------------------------------------
+# bootstrap-role
+# ---------------------------------------------------------------------------
+
+@app.command("bootstrap-role")
+def bootstrap_role(
+    management_account: Annotated[
+        str,
+        typer.Option(
+            "--management-account", "-m",
+            help="Control Tower management account ID (12-digit). Used as the trust principal.",
+        ),
+    ],
+    role_name: Annotated[
+        str,
+        typer.Option("--role-name", help="IAM role name to create in the target account."),
+    ] = _DEFAULT_CT_ROLE,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", "-y", help="Skip confirmation prompt."),
+    ] = False,
+) -> None:
+    """
+    Create the AWSControlTowerExecution IAM role in the target account.
+
+    Authenticates as the target account via the global --profile flag, then
+    creates the role with a trust policy that allows the Control Tower management
+    account to assume it, and attaches AdministratorAccess — exactly as the
+    CT enrollment documentation requires.
+
+    If the role already exists the command reports its ARN and exits cleanly.
+
+    \b
+    Examples:
+      standstill --profile target-account blueprint bootstrap-role --management-account 123456789012
+      standstill --profile target-account blueprint bootstrap-role \\
+          --management-account 123456789012 --role-name AWSControlTowerExecution --yes
+    """
+    # Resolve the caller identity so the user can confirm the right account
+    try:
+        sts = _state.state.get_client("sts")
+        identity = sts.get_caller_identity()
+    except Exception as e:
+        err.print(f"[bold red]Error:[/bold red] Cannot resolve caller identity: {e}")
+        raise typer.Exit(1)
+
+    target_account_id = identity["Account"]
+
+    renderer.console.print(
+        f"[bold]Target account:[/bold]  [cyan]{target_account_id}[/cyan]  "
+        f"[dim]({identity.get('Arn', '')})[/dim]\n"
+        f"[bold]Management account:[/bold] [cyan]{management_account}[/cyan]\n"
+        f"[bold]Role name:[/bold]         [cyan]{role_name}[/cyan]\n"
+    )
+
+    if not yes:
+        typer.confirm(
+            f"Create IAM role '{role_name}' in account {target_account_id}?", abort=True
+        )
+
+    try:
+        iam = _state.state.get_client("iam")
+        result = bp_api.create_ct_execution_role(
+            iam_client=iam,
+            management_account_id=management_account,
+            role_name=role_name,
+        )
+    except RuntimeError as e:
+        err.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    if result["action"] == "exists":
+        renderer.console.print(
+            f"[yellow]Role already exists:[/yellow] {result['role_arn']}\n"
+            "[dim]No changes were made.[/dim]"
+        )
+    else:
+        renderer.console.print(
+            f"[bold green]✓ Role created:[/bold green] {result['role_arn']}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # list
