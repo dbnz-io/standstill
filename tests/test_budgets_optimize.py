@@ -7,14 +7,10 @@ import pytest
 
 from standstill.aws.budgets import Budget, list_budgets
 from standstill.aws.optimize import (
-    RISummary,
-    RightsizingRecommendation,
-    SavingsPlansSummary,
     get_ri_summary,
     get_rightsizing_recommendations,
     get_savings_plans_summary,
 )
-
 
 # ---------------------------------------------------------------------------
 # Budget dataclass

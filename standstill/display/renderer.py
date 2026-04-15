@@ -743,7 +743,10 @@ def render_cost_report(
     if use_matrix:
         _render_cost_matrix(periods, group_label, metric_label, unit, estimated, account_names)
     else:
-        _render_cost_aggregated(periods, group_label, metric_label, unit, estimated, granularity, group_by=group_by, account_names=account_names)
+        _render_cost_aggregated(
+            periods, group_label, metric_label, unit, estimated,
+            granularity, group_by=group_by, account_names=account_names,
+        )
 
 
 def _resolve_key_label(key: str, account_names: dict[str, str] | None) -> str:
@@ -1090,7 +1093,7 @@ def render_trail_config(s3_cfg: dict | None, cloudwatch_log_group: str | None) -
 
 def render_scan_result(result, target: str = "event-history") -> None:  # result: cloudtrail_scan.ScanResult
     """Render a CloudTrail scan as three Rich tables: metadata, summary, events."""
-    from standstill.aws.usage_type_map import get_usage_type_info, _REGION_PREFIX_RE
+    from standstill.aws.usage_type_map import _REGION_PREFIX_RE, get_usage_type_info
 
     info = get_usage_type_info(_REGION_PREFIX_RE.sub("", result.usage_type))
     event_type_str = (info.event_type or "—") if info else "—"
@@ -1377,7 +1380,11 @@ def render_anomalies(anomaly_list: list) -> None:
 
     console.print(t)
     total_impact = sum(a.impact_total for a in anomaly_list)
-    console.print(f"\n[dim]{len(anomaly_list)} anomal{'y' if len(anomaly_list) == 1 else 'ies'}  •  Total impact: [bold red]${total_impact:,.2f}[/bold red][/dim]")
+    label = "anomaly" if len(anomaly_list) == 1 else "anomalies"
+    console.print(
+        f"\n[dim]{len(anomaly_list)} {label}  •  "
+        f"Total impact: [bold red]${total_impact:,.2f}[/bold red][/dim]"
+    )
 
 
 def render_anomalies_csv(anomaly_list: list) -> None:

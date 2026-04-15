@@ -25,7 +25,8 @@ _MAP: list[tuple[str, UsageTypeInfo]] = [
     # -------------------------------------------------------------------------
     # CloudWatch
     # -------------------------------------------------------------------------
-    ("CW:Requests",               UsageTypeInfo("CloudWatch",       ["GetMetricData", "PutMetricData", "GetMetricStatistics", "ListMetrics"])),
+    ("CW:Requests",               UsageTypeInfo("CloudWatch",
+                                               ["GetMetricData", "PutMetricData", "GetMetricStatistics", "ListMetrics"])),
     ("CW:GMD-Metrics",            UsageTypeInfo("CloudWatch",       ["GetMetricData"])),
     ("CW:MetricMonitorUsage",     UsageTypeInfo("CloudWatch",       ["PutMetricAlarm", "DescribeAlarms"])),
     ("CW:AlarmMonitorUsage",      UsageTypeInfo("CloudWatch",       ["PutMetricAlarm", "DescribeAlarms"])),

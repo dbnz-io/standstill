@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -277,7 +276,7 @@ def scan(
         end:          Exclusive end datetime (UTC).
         max_events:   Upper bound on total events returned.
     """
-    from standstill.aws.usage_type_map import get_usage_type_info, _REGION_PREFIX_RE
+    from standstill.aws.usage_type_map import _REGION_PREFIX_RE, get_usage_type_info
 
     # Resolve the service name for the result label.
     base = _REGION_PREFIX_RE.sub("", usage_type)
@@ -422,7 +421,7 @@ def scan_s3(
                     e.g. ``"AWSLogs/123456789012/CloudTrail/us-east-1"``.
         max_events: Upper bound on total events returned.
     """
-    from standstill.aws.usage_type_map import get_usage_type_info, _REGION_PREFIX_RE
+    from standstill.aws.usage_type_map import _REGION_PREFIX_RE, get_usage_type_info
 
     base    = _REGION_PREFIX_RE.sub("", usage_type)
     info    = get_usage_type_info(base)
@@ -488,7 +487,7 @@ def scan_cloudwatch(
         poll_interval: Seconds between status polls (default 2 s).
         max_events:    Limit passed to the Insights ``limit`` clause.
     """
-    from standstill.aws.usage_type_map import get_usage_type_info, _REGION_PREFIX_RE
+    from standstill.aws.usage_type_map import _REGION_PREFIX_RE, get_usage_type_info
 
     base    = _REGION_PREFIX_RE.sub("", usage_type)
     info    = get_usage_type_info(base)

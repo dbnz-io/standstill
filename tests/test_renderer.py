@@ -1,13 +1,18 @@
 """Tests for standstill/display/renderer.py — verify all render functions run without error."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from io import StringIO
 
 import pytest
 from rich.console import Console
 
+from standstill.aws.budgets import Budget
+from standstill.aws.cloudtrail_scan import ScanResult, TrailEvent
 from standstill.aws.config_recorder import RecorderResult, RecorderState
 from standstill.aws.controltower import Control, EnabledControl
+from standstill.aws.cost import Anomaly, CostGroup, CostPeriod
+from standstill.aws.optimize import RightsizingRecommendation, RISummary, SavingsPlansSummary
 from standstill.aws.organizations import Account, OUNode
 from standstill.aws.security_services import (
     AccountAssessment,
@@ -456,16 +461,10 @@ def test_render_json():
     renderer.render_json({"key": "value", "number": 42})
 
 
+
 # ---------------------------------------------------------------------------
 # Cost Explorer
 # ---------------------------------------------------------------------------
-
-from datetime import datetime, timezone
-from standstill.aws.budgets import Budget
-from standstill.aws.cloudtrail_scan import ScanResult, TrailEvent
-from standstill.aws.cost import Anomaly, CostGroup, CostPeriod
-from standstill.aws.optimize import RightsizingRecommendation, RISummary, SavingsPlansSummary
-
 
 def _period(start="2024-01-01", end="2024-02-01", groups=None, total=120.0):
     g = groups or [

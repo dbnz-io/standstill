@@ -10,9 +10,7 @@ from typer.testing import CliRunner
 import standstill.config as cfg_module
 from standstill import state as _state
 from standstill.aws.budgets import Budget
-from standstill.aws.cloudtrail_scan import ScanResult, TrailEvent
-from standstill.aws.cost import Anomaly, CostGroup, CostPeriod
-from standstill.aws.optimize import RightsizingRecommendation, SavingsPlansSummary
+from standstill.aws.cost import CostGroup, CostPeriod
 from standstill.commands.cost import app
 from standstill.display import renderer
 
@@ -69,7 +67,6 @@ class TestReportCommand:
             assert result.exit_code == 0
 
     def test_json_output(self):
-        import json as _json
         with patch("standstill.commands.cost._ce") as mock_ce_fn:
             ce = MagicMock()
             ce.get_cost_and_usage.return_value = {
@@ -355,8 +352,6 @@ class TestBudgetsCommand:
         with patch("standstill.commands.cost._state") as mock_state:
             sts_mock = MagicMock()
             sts_mock.get_caller_identity.return_value = {"Account": "123456789012"}
-            budgets_mock = MagicMock()
-            budgets_mock_resp = {"Budgets": []}
 
             def get_client(svc, **kw):
                 if svc == "sts":

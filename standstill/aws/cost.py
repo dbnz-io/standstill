@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date
 
-
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -380,7 +379,6 @@ def compute_prior_period(start: str, end: str) -> tuple[str, str]:
 
     E.g. March 2024 (2024-03-01 → 2024-04-01) → February 2024 (2024-02-01 → 2024-03-01).
     """
-    from datetime import timedelta
     s = date.fromisoformat(start)
     e = date.fromisoformat(end)
     delta = e - s

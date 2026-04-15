@@ -711,7 +711,8 @@ def scan_usage_type(
       standstill -o csv  cost scan usage-type CloudTrail-DataEvent-S3 --target s3 > events.csv
     """
     from datetime import datetime, timezone
-    from standstill.aws.usage_type_map import get_usage_type_info, get_event_source, _REGION_PREFIX_RE
+
+    from standstill.aws.usage_type_map import _REGION_PREFIX_RE, get_event_source, get_usage_type_info
 
     # Resolve dates.
     today = date.today()

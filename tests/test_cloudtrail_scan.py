@@ -2,12 +2,8 @@
 from __future__ import annotations
 
 import json
-import gzip
-import io
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from standstill.aws.cloudtrail_scan import ScanResult, TrailEvent, scan
 from standstill.aws.usage_type_map import (
@@ -15,7 +11,6 @@ from standstill.aws.usage_type_map import (
     get_event_source,
     get_usage_type_info,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

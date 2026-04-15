@@ -1,15 +1,12 @@
 """Tests for standstill/aws/cost.py — unit tests with mocked CE client."""
 from __future__ import annotations
 
-from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from standstill.aws.cost import (
     Anomaly,
-    CostGroup,
-    CostPeriod,
     _build_ce_filter,
     compute_prior_period,
     get_anomalies,
@@ -21,7 +18,6 @@ from standstill.aws.cost import (
     resolve_service_filter,
     service_filter_alias,
 )
-
 
 # ---------------------------------------------------------------------------
 # _build_ce_filter
