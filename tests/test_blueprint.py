@@ -1,13 +1,20 @@
 """Tests for the blueprints feature."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 from typer.testing import CliRunner
 
-from standstill.aws.blueprint import StackResult, deploy_stack, poll_stack
+from standstill.aws.blueprint import (
+    StackResult,
+    create_ct_execution_role,
+    deploy_stack,
+    poll_stack,
+)
 from standstill.main import app
 from standstill.models.blueprint_config import BlueprintStack, load_blueprint
 
@@ -746,15 +753,12 @@ class TestFindAccountByEmail:
 # ===========================================================================
 
 class TestCreateCtExecutionRole:
-    from botocore.exceptions import ClientError as _CE
-
     def _iam(self, *, role_arn: str = "arn:aws:iam::999999999999:role/AWSControlTowerExecution"):
         m = MagicMock()
         m.create_role.return_value = {"Role": {"Arn": role_arn}}
         return m
 
     def test_creates_role_and_attaches_policy(self):
-        from standstill.aws.blueprint import create_ct_execution_role
         iam = self._iam()
         result = create_ct_execution_role(iam, "123456789012")
         assert result["action"] == "created"
@@ -766,8 +770,6 @@ class TestCreateCtExecutionRole:
         )
 
     def test_trust_policy_contains_management_account(self):
-        import json
-        from standstill.aws.blueprint import create_ct_execution_role
         iam = self._iam()
         create_ct_execution_role(iam, "123456789012")
         _, kwargs = iam.create_role.call_args
@@ -776,7 +778,6 @@ class TestCreateCtExecutionRole:
         assert "123456789012" in principal
 
     def test_custom_role_name(self):
-        from standstill.aws.blueprint import create_ct_execution_role
         iam = self._iam(role_arn="arn:aws:iam::999:role/MyCustomRole")
         result = create_ct_execution_role(iam, "123456789012", role_name="MyCustomRole")
         assert result["action"] == "created"
@@ -784,8 +785,6 @@ class TestCreateCtExecutionRole:
         assert kwargs["RoleName"] == "MyCustomRole"
 
     def test_returns_exists_when_role_already_present(self):
-        from botocore.exceptions import ClientError
-        from standstill.aws.blueprint import create_ct_execution_role
         iam = MagicMock()
         iam.create_role.side_effect = ClientError(
             {"Error": {"Code": "EntityAlreadyExists", "Message": "already exists"}},
@@ -800,8 +799,6 @@ class TestCreateCtExecutionRole:
         iam.attach_role_policy.assert_not_called()
 
     def test_raises_on_unexpected_iam_error(self):
-        from botocore.exceptions import ClientError
-        from standstill.aws.blueprint import create_ct_execution_role
         iam = MagicMock()
         iam.create_role.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "not authorized"}},
@@ -811,8 +808,6 @@ class TestCreateCtExecutionRole:
             create_ct_execution_role(iam, "123456789012")
 
     def test_raises_when_policy_attach_fails(self):
-        from botocore.exceptions import ClientError
-        from standstill.aws.blueprint import create_ct_execution_role
         iam = self._iam()
         iam.attach_role_policy.side_effect = ClientError(
             {"Error": {"Code": "AccessDenied", "Message": "cannot attach"}},
