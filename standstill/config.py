@@ -67,3 +67,41 @@ def unset_delegated_admin() -> None:
     data = load()
     data.pop("delegated_admin_account", None)
     save(data)
+
+
+# ---------------------------------------------------------------------------
+# CloudTrail log target
+# ---------------------------------------------------------------------------
+
+def get_trail_s3() -> dict | None:
+    """Return ``{"bucket": str, "prefix": str}`` or ``None``."""
+    return load().get("cost_trail", {}).get("s3")
+
+
+def set_trail_s3(bucket: str, prefix: str) -> None:
+    data = load()
+    data.setdefault("cost_trail", {})["s3"] = {"bucket": bucket, "prefix": prefix}
+    save(data)
+
+
+def unset_trail_s3() -> None:
+    data = load()
+    data.get("cost_trail", {}).pop("s3", None)
+    save(data)
+
+
+def get_trail_cloudwatch() -> str | None:
+    """Return the CloudWatch Logs log-group name, or ``None``."""
+    return load().get("cost_trail", {}).get("cloudwatch_log_group")
+
+
+def set_trail_cloudwatch(log_group: str) -> None:
+    data = load()
+    data.setdefault("cost_trail", {})["cloudwatch_log_group"] = log_group
+    save(data)
+
+
+def unset_trail_cloudwatch() -> None:
+    data = load()
+    data.get("cost_trail", {}).pop("cloudwatch_log_group", None)
+    save(data)

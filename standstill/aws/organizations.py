@@ -111,6 +111,26 @@ def flatten_ous(nodes: list[OUNode]) -> list[OUNode]:
     return result
 
 
+def account_id_to_name_map() -> dict[str, str]:
+    """
+    Return ``{account_id: account_name}`` for every account in the organization.
+
+    Uses ``organizations:ListAccounts`` directly — cheaper and faster than
+    walking the full OU tree when you only need name resolution.
+    """
+    org = _state.state.get_client("organizations")
+    result: dict[str, str] = {}
+    kwargs: dict = {}
+    while True:
+        resp = org.list_accounts(**kwargs)
+        for acct in resp.get("Accounts", []):
+            result[acct["Id"]] = acct["Name"]
+        if "NextToken" not in resp:
+            break
+        kwargs["NextToken"] = resp["NextToken"]
+    return result
+
+
 def all_accounts(nodes: list[OUNode]) -> list[Account]:
     """Collect every account from the entire tree."""
     accounts: list[Account] = []
