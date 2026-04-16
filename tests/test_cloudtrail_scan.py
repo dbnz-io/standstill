@@ -84,6 +84,65 @@ class TestUsageTypeMap:
         info = get_usage_type_info("Lambda-Requests")
         assert info is not None
 
+    # ------------------------------------------------------------------
+    # Phase 2 — instance-family regex (no service prefix)
+    # ------------------------------------------------------------------
+
+    def test_redshift_dc2_node(self):
+        info = get_usage_type_info("DC2.Large-NodeUsage")
+        assert info is not None
+        assert info.service == "Redshift"
+
+    def test_redshift_ra3_node(self):
+        info = get_usage_type_info("RA3.4XLarge-NodeUsage")
+        assert info is not None
+        assert info.service == "Redshift"
+
+    def test_redshift_ds2_node(self):
+        info = get_usage_type_info("DS2.XLarge-NodeUsage")
+        assert info is not None
+        assert info.service == "Redshift"
+
+    def test_redshift_node_with_region_prefix(self):
+        info = get_usage_type_info("USE1-DC2.Large-NodeUsage")
+        assert info is not None
+        assert info.service == "Redshift"
+
+    def test_elasticache_cache_node(self):
+        info = get_usage_type_info("cache.r6g.large-NodeUsage")
+        assert info is not None
+        assert info.service == "ElastiCache"
+
+    def test_rds_bare_instance_type(self):
+        info = get_usage_type_info("db.r5.large-Multi-AZ")
+        assert info is not None
+        assert info.service == "RDS"
+
+    # ------------------------------------------------------------------
+    # Phase 3 — Amazon*/AWS* name-extraction fallback
+    # ------------------------------------------------------------------
+
+    def test_fallback_amazon_prefix(self):
+        info = get_usage_type_info("AmazonFutureService-SomeFeature")
+        assert info is not None
+        assert info.service == "Future Service"
+
+    def test_fallback_aws_prefix(self):
+        info = get_usage_type_info("AWSNewThing-Usage")
+        assert info is not None
+        assert info.service == "New Thing"
+
+    def test_fallback_no_match_returns_none(self):
+        # Totally unknown prefix with no Amazon/AWS token → None
+        info = get_usage_type_info("BOGUS:Unknown")
+        assert info is None
+
+    def test_fallback_not_triggered_when_phase1_matches(self):
+        # AmazonGuardDuty- must be resolved by Phase 1, not fallback
+        info = get_usage_type_info("AmazonGuardDuty-DataSources")
+        assert info is not None
+        assert info.service == "GuardDuty"
+
 
 # ---------------------------------------------------------------------------
 # ScanResult — summary_by_event
