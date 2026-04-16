@@ -3,9 +3,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-# Region-code prefix that CE prepends to many usage types, e.g. "USE1-", "EUW1-".
-# Pattern: 2–4 uppercase letters + 1 digit + dash.
-_REGION_PREFIX_RE = re.compile(r"^[A-Z]{2,4}\d-")
+# Prefix that CE prepends to many usage types.  Three forms:
+#   • Abbreviated region code: 2–4 uppercase letters + 1 digit + dash
+#     e.g. "USE1-", "EUW1-", "APN1-", "APSE3-"
+#   • "Global-"   — used by CloudFront, Route 53, and other global services
+#   • "NoRegion-" — used for account-level or region-agnostic line items
+_REGION_PREFIX_RE = re.compile(r"^(?:[A-Z]{2,4}\d|Global|NoRegion)-")
 
 
 @dataclass
@@ -707,10 +710,38 @@ _MAP: list[tuple[str, UsageTypeInfo]] = [
     ("AWSTransfer-",  UsageTypeInfo("Transfer Family", [])),
 
     # =========================================================================
-    # IoT Core / Greengrass
+    # IoT — sub-services first (AWSIoTXxx- does NOT match AWSIoT-)
     # =========================================================================
-    ("AWSIoT-",         UsageTypeInfo("IoT Core",       [])),
-    ("AWSGreengrass-",  UsageTypeInfo("IoT Greengrass", [])),
+    ("AWSIoTAnalytics-",       UsageTypeInfo("IoT Analytics",        [])),
+    ("AWSIoTSiteWise-",        UsageTypeInfo("IoT SiteWise",         [])),
+    ("AWSIoTEvents-",          UsageTypeInfo("IoT Events",           [])),
+    ("AWSIoTTwinMaker-",       UsageTypeInfo("IoT TwinMaker",        [])),
+    ("AWSIoTFleetWise-",       UsageTypeInfo("IoT FleetWise",        [])),
+    ("AWSIoTDeviceDefender-",  UsageTypeInfo("IoT Device Defender",  [])),
+    ("AWSIoTDeviceMgmt-",      UsageTypeInfo("IoT Device Management", [])),
+    ("AWSIoTCore-",            UsageTypeInfo("IoT Core",             [])),
+    ("AWSIoTGreengrass-",      UsageTypeInfo("IoT Greengrass",       [])),
+    ("AWSIoT-",                UsageTypeInfo("IoT Core",             [])),
+    ("AWSGreengrass-",         UsageTypeInfo("IoT Greengrass",       [])),
+
+    # =========================================================================
+    # Amazon Q / CodeWhisperer
+    # =========================================================================
+    ("AmazonQDeveloper-",  UsageTypeInfo("Amazon Q Developer", [])),
+    ("AmazonQBusiness-",   UsageTypeInfo("Amazon Q Business",  [])),
+    ("AmazonQ-",           UsageTypeInfo("Amazon Q",           [])),
+    ("AWSCodeWhisperer-",  UsageTypeInfo("CodeWhisperer",      [])),
+
+    # =========================================================================
+    # Lookup / AI specialists with non-standard naming
+    # =========================================================================
+    ("AmazonLookoutforVision-",    UsageTypeInfo("Lookout for Vision",    [])),
+    ("AmazonLookoutforEquipment-", UsageTypeInfo("Lookout for Equipment", [])),
+    ("AmazonLookoutMetrics-",      UsageTypeInfo("Lookout for Metrics",   [])),
+    ("AmazonFraudDetector-",       UsageTypeInfo("Fraud Detector",        [])),
+    ("AmazonHealthLake-",          UsageTypeInfo("HealthLake",            [])),
+    ("AmazonOmics-",               UsageTypeInfo("HealthOmics",           [])),
+    ("AmazonOpenSearchIngestion-", UsageTypeInfo("OpenSearch Ingestion",  [])),
 
     # =========================================================================
     # Media Services
@@ -730,12 +761,18 @@ _MAP: list[tuple[str, UsageTypeInfo]] = [
     ("AmazonGameLift-",   UsageTypeInfo("GameLift",  [])),
 
     # =========================================================================
-    # Cost / billing line items
+    # Cost / billing line items and adjustments
     # =========================================================================
-    ("AWSCostExplorer-",     UsageTypeInfo("Cost Explorer", [])),
-    ("AWSBudgets-",          UsageTypeInfo("Budgets",       [])),
-    ("SavingsPlanNegation",  UsageTypeInfo("Savings Plans", [], "Credit")),
-    ("SavingsPlan-",         UsageTypeInfo("Savings Plans", [])),
+    ("AWSCostExplorer-",     UsageTypeInfo("Cost Explorer",       [])),
+    ("AWSBudgets-",          UsageTypeInfo("Budgets",             [])),
+    ("SavingsPlanNegation",  UsageTypeInfo("Savings Plans",       [], "Credit")),
+    ("SavingsPlan-",         UsageTypeInfo("Savings Plans",       [])),
+    ("Tax-",                 UsageTypeInfo("Tax",                 [], "Billing Adjustment")),
+    ("Credit",               UsageTypeInfo("Credit",              [], "Billing Adjustment")),
+    ("Refund",               UsageTypeInfo("Refund",              [], "Billing Adjustment")),
+    ("EDPDiscount",          UsageTypeInfo("Enterprise Discount", [], "Billing Adjustment")),
+    ("BundledDiscount",      UsageTypeInfo("Bundled Discount",    [], "Billing Adjustment")),
+    ("PrivateRateDiscount",  UsageTypeInfo("Private Rate",        [], "Billing Adjustment")),
 
     # =========================================================================
     # Support
@@ -781,7 +818,12 @@ _INSTANCE_RE_MAP: list[tuple[re.Pattern[str], UsageTypeInfo]] = [
 #   AWSThirdPartyIntegration-  →  "Third Party Integration"
 # ---------------------------------------------------------------------------
 
-_FALLBACK_RE = re.compile(r"^(?:Amazon|AWS)([A-Z][A-Za-z0-9]+)")
+# Allow a single uppercase letter (e.g. "Q" in AmazonQ-) so AmazonQ- → "Q".
+_FALLBACK_RE = re.compile(r"^(?:Amazon|AWS)([A-Z][A-Za-z0-9]*)")
+
+# Known acronyms that contain lowercase letters and must not be split by the
+# camelCase rule.  Each entry is replaced with a sentinel, split, then restored.
+_ACRONYMS = ("IoT",)
 
 
 def _fallback_service_name(base: str) -> str | None:
@@ -790,9 +832,16 @@ def _fallback_service_name(base: str) -> str | None:
     if not m:
         return None
     raw = m.group(1)
-    # Insert space before each uppercase letter that follows a lowercase/digit,
-    # so "SecurityHub" → "Security Hub", "WAFv2" stays "WAFv2".
-    return re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw)
+    # Protect acronyms that contain lowercase letters (e.g. IoT → iot_GUARD)
+    # so "IoTAnalytics" doesn't become "Io T Analytics".
+    for acr in _ACRONYMS:
+        raw = raw.replace(acr, acr.upper() + "_")
+    # Standard camelCase split: "SecurityHub" → "Security Hub"
+    raw = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", raw)
+    # Restore acronyms to their canonical mixed-case form
+    for acr in _ACRONYMS:
+        raw = raw.replace(acr.upper() + "_", acr + " ")
+    return raw.strip()
 
 
 # ---------------------------------------------------------------------------

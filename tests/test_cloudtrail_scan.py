@@ -143,6 +143,82 @@ class TestUsageTypeMap:
         assert info is not None
         assert info.service == "GuardDuty"
 
+    # ------------------------------------------------------------------
+    # Region prefix stripping — Global- and NoRegion- variants
+    # ------------------------------------------------------------------
+
+    def test_global_prefix_stripped(self):
+        info = get_usage_type_info("Global-CloudFront-Out-Bytes")
+        assert info is not None
+        assert info.service == "CloudFront"
+
+    def test_noregion_prefix_stripped(self):
+        info = get_usage_type_info("NoRegion-CloudFront-Requests")
+        assert info is not None
+        assert info.service == "CloudFront"
+
+    def test_global_data_transfer(self):
+        info = get_usage_type_info("Global-DataTransfer-Out-Bytes")
+        assert info is not None
+        assert info.service == "EC2"
+
+    def test_global_route53(self):
+        info = get_usage_type_info("Global-Route53-DNS-Queries")
+        assert info is not None
+        assert info.service == "Route 53"
+
+    # ------------------------------------------------------------------
+    # IoT sub-services (previously mangled by Phase 3)
+    # ------------------------------------------------------------------
+
+    def test_iot_analytics(self):
+        info = get_usage_type_info("AWSIoTAnalytics-DataProcessed")
+        assert info is not None
+        assert info.service == "IoT Analytics"
+
+    def test_iot_sitewise(self):
+        info = get_usage_type_info("AWSIoTSiteWise-AssetModels")
+        assert info is not None
+        assert info.service == "IoT SiteWise"
+
+    def test_iot_events(self):
+        info = get_usage_type_info("AWSIoTEvents-Evaluations")
+        assert info is not None
+        assert info.service == "IoT Events"
+
+    # ------------------------------------------------------------------
+    # Amazon Q (previously returned None for single-char Q)
+    # ------------------------------------------------------------------
+
+    def test_amazon_q(self):
+        info = get_usage_type_info("AmazonQ-Usage")
+        assert info is not None
+        assert info.service == "Amazon Q"
+
+    def test_amazon_q_developer(self):
+        info = get_usage_type_info("AmazonQDeveloper-Requests")
+        assert info is not None
+        assert info.service == "Amazon Q Developer"
+
+    # ------------------------------------------------------------------
+    # Billing adjustment line items (previously returned None)
+    # ------------------------------------------------------------------
+
+    def test_tax_line_item(self):
+        info = get_usage_type_info("Tax-US")
+        assert info is not None
+        assert info.service == "Tax"
+
+    def test_credit_line_item(self):
+        info = get_usage_type_info("Credit")
+        assert info is not None
+        assert info.service == "Credit"
+
+    def test_edp_discount(self):
+        info = get_usage_type_info("EDPDiscount")
+        assert info is not None
+        assert "Discount" in info.service
+
 
 # ---------------------------------------------------------------------------
 # ScanResult — summary_by_event
