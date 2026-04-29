@@ -149,3 +149,47 @@ services:
       # ⚠  Uncomment to enable unused-access analysis (~$1.20/role/month):
       # - name: standstill-unused-access-analyzer
       #   type: ORGANIZATION_UNUSED_ACCESS
+
+  # ── Security Lake ──────────────────────────────────────────────────────────
+  # Centralised security data lake — ingests logs from all org accounts into S3.
+  # Cost model: S3 storage + data ingestion; varies by log volume and regions.
+  # Prerequisite: the AmazonSecurityLakeMetaStoreManagerV2 IAM role must exist
+  #               in the delegated admin account before applying.
+  #
+  # Disabled by default. Enable when you are ready to commit to ingestion costs.
+  security_lake:
+    enabled: false
+
+    # AWS regions where the data lake will be created.
+    regions:
+      - us-east-1
+
+    # IAM role ARN used by Security Lake's Glue metadata store.
+    # Leave blank to auto-derive:
+    #   arn:aws:iam::<delegated_admin_account>:role/AmazonSecurityLakeMetaStoreManagerV2
+    meta_store_manager_role_arn: ""
+
+    organization:
+      # Automatically enable Security Lake for new member accounts.
+      auto_enable_new_accounts: true
+
+    lifecycle:
+      # Days before objects expire (0 = never expire).
+      expiration_days: 365
+
+      # Days before objects transition to a cheaper storage class (0 = no transition).
+      transition_days: 0
+
+      # Storage class to transition to after transition_days.
+      # Options: STANDARD_IA | ONEZONE_IA | INTELLIGENT_TIERING |
+      #          GLACIER_INSTANT_RETRIEVAL | GLACIER_FLEXIBLE_RETRIEVAL | DEEP_ARCHIVE
+      transition_storage_class: INTELLIGENT_TIERING
+
+    # Log sources auto-enabled in new org accounts.
+    # Options: CLOUD_TRAIL_MGMT | ROUTE53 | SH_FINDINGS | VPC_FLOW |
+    #          EKS_AUDIT | LAMBDA_EXECUTION | S3_DATA | WAFV2
+    sources:
+      - CLOUD_TRAIL_MGMT
+      - ROUTE53
+      - SH_FINDINGS
+      - VPC_FLOW

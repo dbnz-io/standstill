@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import boto3
 from botocore.exceptions import ClientError
@@ -16,14 +16,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-SERVICE_PRINCIPALS: dict[str, str] = {
-    "guardduty":       "guardduty.amazonaws.com",
-    "security_hub":    "securityhub.amazonaws.com",
-    "macie":           "macie.amazonaws.com",
-    "inspector":       "inspector2.amazonaws.com",
-    "access_analyzer": "access-analyzer.amazonaws.com",
-}
 
 SECURITY_HUB_STANDARD_ARNS: dict[str, str] = {
     "fsbp":    "arn:aws:securityhub:{r}::standards/aws-foundational-security-best-practices/v/1.0.0",
@@ -101,6 +93,32 @@ class ServiceStatus:
 
 
 # ---------------------------------------------------------------------------
+# Service registry
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SecurityService:
+    """
+    Descriptor for a security service managed by standstill.
+
+    Adding a new service means adding one entry to ``SERVICES`` below plus
+    the four implementation functions (delegate, configure, fill_status,
+    read_config).  No other code needs to change.
+
+    ``fetch_members_fn`` is None for org-wide services (Access Analyzer,
+    Security Lake) that cover all accounts automatically without a
+    per-account membership concept.
+    """
+    key: str
+    principal: str
+    delegate_fn: Callable[[str, str], None]
+    configure_fn: Callable[..., ServiceApplyResult]
+    fill_status_fn: Callable[[ServiceStatus, str, str, str], None]
+    read_config_fn: Callable[[str, str, str], dict]
+    fetch_members_fn: Callable[[str, str, str], dict[str, str]] | None = None
+
+
+# ---------------------------------------------------------------------------
 # Session helpers
 # ---------------------------------------------------------------------------
 
@@ -127,93 +145,40 @@ def _admin_client(service: str, admin_account_id: str, role_name: str, region: s
 
 
 # ---------------------------------------------------------------------------
-# Delegation — Phase 1 (called from management account)
+# Delegation helpers — one per service
 # ---------------------------------------------------------------------------
 
-def check_delegated_admins(target_account: str, region: str) -> list[DelegationStatus]:
-    """
-    Check which services already have a delegated administrator registered,
-    and compute the action needed for each.
-    """
+def _delegate_guardduty(target_account: str, region: str) -> None:
+    gd = _state.state.get_client("guardduty", region_name=region)
+    gd.enable_organization_admin_account(AdminAccountId=target_account)
+
+
+def _delegate_security_hub(target_account: str, region: str) -> None:
+    sh = _state.state.get_client("securityhub", region_name=region)
+    sh.enable_organization_admin_account(AdminAccountId=target_account)
+
+
+def _delegate_macie(target_account: str, region: str) -> None:
+    mc = _state.state.get_client("macie2", region_name=region)
+    mc.enable_organization_admin_account(AdminAccountId=target_account)
+
+
+def _delegate_inspector(target_account: str, region: str) -> None:
+    ins = _state.state.get_client("inspector2", region_name=region)
+    ins.enable_delegated_admin_account(DelegatedAdminAccountId=target_account)
+
+
+def _delegate_access_analyzer(target_account: str, region: str) -> None:
     org = _state.state.get_client("organizations", region_name=region)
-    statuses: list[DelegationStatus] = []
-
-    for svc, principal in SERVICE_PRINCIPALS.items():
-        try:
-            resp = org.list_delegated_administrators(ServicePrincipal=principal)
-            admins = resp.get("DelegatedAdministrators", [])
-            current = admins[0]["Id"] if admins else None
-        except ClientError as exc:
-            statuses.append(DelegationStatus(
-                service=svc, principal=principal,
-                current_admin=None, target_admin=target_account,
-                action="error", error=exc.response["Error"]["Message"],
-            ))
-            continue
-
-        if current is None:
-            action = "register"
-        elif current == target_account:
-            action = "skip"
-        else:
-            action = "conflict"  # different account already registered
-
-        statuses.append(DelegationStatus(
-            service=svc, principal=principal,
-            current_admin=current, target_admin=target_account,
-            action=action,
-        ))
-
-    return statuses
+    org.register_delegated_administrator(
+        AccountId=target_account,
+        ServicePrincipal="access-analyzer.amazonaws.com",
+    )
 
 
-def register_delegated_admin(
-    service: str,
-    target_account: str,
-    region: str,
-) -> ServiceApplyResult:
-    """Register the delegated administrator for a single service."""
-    try:
-        if service == "guardduty":
-            gd = _state.state.get_client("guardduty", region_name=region)
-            gd.enable_organization_admin_account(AdminAccountId=target_account)
-
-        elif service == "security_hub":
-            sh = _state.state.get_client("securityhub", region_name=region)
-            sh.enable_organization_admin_account(AdminAccountId=target_account)
-
-        elif service == "macie":
-            mc = _state.state.get_client("macie2", region_name=region)
-            mc.enable_organization_admin_account(AdminAccountId=target_account)
-
-        elif service == "inspector":
-            ins = _state.state.get_client("inspector2", region_name=region)
-            ins.enable_delegated_admin_account(DelegatedAdminAccountId=target_account)
-
-        elif service == "access_analyzer":
-            org = _state.state.get_client("organizations", region_name=region)
-            org.register_delegated_administrator(
-                AccountId=target_account,
-                ServicePrincipal=SERVICE_PRINCIPALS["access_analyzer"],
-            )
-
-        return ServiceApplyResult(
-            service=service, phase="delegation", success=True,
-            message=f"Delegated admin registered: {target_account}",
-        )
-
-    except ClientError as exc:
-        code = exc.response["Error"]["Code"]
-        # Already registered by another path
-        if code in ("AccountAlreadyRegisteredException", "AlreadyExistsException"):
-            return ServiceApplyResult(
-                service=service, phase="delegation", success=True,
-                message="Already registered (skipped).",
-            )
-        return ServiceApplyResult(
-            service=service, phase="delegation", success=False,
-            message=exc.response["Error"]["Message"],
-        )
+def _delegate_security_lake(target_account: str, region: str) -> None:
+    sl = _state.state.get_client("securitylake", region_name=region)
+    sl.register_data_lake_delegated_administrator(accountId=target_account)
 
 
 # ---------------------------------------------------------------------------
@@ -471,367 +436,350 @@ def configure_access_analyzer(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Status
-# ---------------------------------------------------------------------------
-
-def get_service_statuses(
-    target_account: str,
+def configure_security_lake(
+    cfg,  # SecurityLakeConfig
+    admin_account: str,
     role_name: str,
     region: str,
-) -> list[ServiceStatus]:
-    """
-    Read the current live state of each security service.
-    Phase 1 info (delegated admin) comes from the management account.
-    Phase 2 info (service config) comes from the delegated admin account.
-    """
-    delegation = {d.service: d for d in check_delegated_admins(target_account, region)}
-    statuses: list[ServiceStatus] = []
+) -> ServiceApplyResult:
+    result = ServiceApplyResult(service="security_lake", phase="configuration", success=False, message="")
+    try:
+        sl = _admin_client("securitylake", admin_account, role_name, region)
 
-    for svc in SERVICE_PRINCIPALS:
-        d = delegation.get(svc)
-        current_admin = d.current_admin if d else None
-        base = ServiceStatus(
-            service=svc,
-            delegated_admin=current_admin,
-            enabled=False,
-            auto_enable="—",
-            details={},
+        meta_role = cfg.meta_store_manager_role_arn or (
+            f"arn:aws:iam::{admin_account}:role/AmazonSecurityLakeMetaStoreManagerV2"
         )
 
-        if current_admin != target_account:
-            base.error = "Delegated admin not registered" if not current_admin else f"Different admin: {current_admin}"
-            statuses.append(base)
-            continue
-
+        # Determine which regions already have a data lake
+        existing_regions: set[str] = set()
         try:
-            _fill_service_status(base, svc, target_account, role_name, region)
-        except Exception as exc:
-            base.error = str(exc)
-
-        statuses.append(base)
-
-    return statuses
-
-
-def _fill_service_status(
-    status: ServiceStatus,
-    service: str,
-    admin_account: str,
-    role_name: str,
-    region: str,
-) -> None:
-    """Populate the service-specific fields of a ServiceStatus in-place."""
-    if service == "guardduty":
-        gd = _admin_client("guardduty", admin_account, role_name, region)
-        detectors = gd.list_detectors().get("DetectorIds", [])
-        if not detectors:
-            return
-        det = gd.get_detector(DetectorId=detectors[0])
-        status.enabled = det.get("Status") == "ENABLED"
-        status.auto_enable = det.get("FindingPublishingFrequency", "—")
-        try:
-            org_cfg = gd.describe_organization_configuration(DetectorId=detectors[0])
-            status.auto_enable = org_cfg.get("AutoEnable", "—")
+            existing = sl.list_data_lakes(regions=cfg.regions).get("dataLakes", [])
+            existing_regions = {dl["region"] for dl in existing}
         except ClientError:
             pass
 
-    elif service == "security_hub":
-        sh = _admin_client("securityhub", admin_account, role_name, region)
-        try:
-            sh.describe_hub()
-            status.enabled = True
-            org_cfg = sh.describe_organization_configuration()
-            status.auto_enable = "ALL" if org_cfg.get("AutoEnable") else "NONE"
-            subs = sh.get_enabled_standards().get("StandardsSubscriptions", [])
-            status.details["standards_count"] = str(len(subs))
-        except ClientError as exc:
-            if exc.response["Error"]["Code"] == "InvalidAccessException":
-                status.enabled = False
+        # Build per-region lifecycle configuration
+        lc: dict = {}
+        if cfg.lifecycle.expiration_days > 0:
+            lc["expiration"] = {"days": cfg.lifecycle.expiration_days}
+        if cfg.lifecycle.transition_days > 0:
+            lc["transitions"] = [{
+                "days": cfg.lifecycle.transition_days,
+                "storageClass": cfg.lifecycle.transition_storage_class,
+            }]
 
-    elif service == "macie":
-        mc = _admin_client("macie2", admin_account, role_name, region)
-        try:
-            session = mc.get_macie_session()
-            status.enabled = session.get("status") == "ENABLED"
-            status.auto_enable = str(session.get("findingPublishingFrequency", "—"))
-            org_cfg = mc.describe_organization_configuration()
-            status.auto_enable = str(org_cfg.get("autoEnable", "—"))
-            disc = mc.get_automated_discovery_configuration()
-            status.details["automated_discovery"] = disc.get("status", "—")
-        except ClientError:
-            pass
+        def _make_conf(r: str) -> dict:
+            conf: dict = {"region": r}
+            if lc:
+                conf["lifecycleConfiguration"] = lc
+            return conf
 
-    elif service == "inspector":
-        ins = _admin_client("inspector2", admin_account, role_name, region)
-        try:
-            org_cfg = ins.describe_organization_configuration()
-            auto = org_cfg.get("autoEnable", {})
-            status.enabled = True
-            status.auto_enable = "ON" if any(auto.values()) else "OFF"
-            status.details = {k: str(v) for k, v in auto.items()}
-        except ClientError:
-            pass
+        to_create = [_make_conf(r) for r in cfg.regions if r not in existing_regions]
+        to_update = [_make_conf(r) for r in cfg.regions if r in existing_regions]
 
-    elif service == "access_analyzer":
-        aa = _admin_client("accessanalyzer", admin_account, role_name, region)
-        try:
-            analyzers = aa.list_analyzers().get("analyzers", [])
-            org_analyzers = [a for a in analyzers if "ORGANIZATION" in a.get("type", "")]
-            status.enabled = bool(org_analyzers)
-            status.auto_enable = "N/A"
-            status.details["analyzers"] = ", ".join(a["name"] for a in org_analyzers) or "none"
-        except ClientError:
-            pass
-
-
-# ---------------------------------------------------------------------------
-# Import — read live configuration from delegated admin account
-# ---------------------------------------------------------------------------
-
-def read_service_configs(
-    admin_account: str,
-    role_name: str,
-    region: str,
-) -> tuple[dict, dict[str, str]]:
-    """
-    Read live service configurations from the delegated admin account.
-
-    Returns (config_dict, errors) where config_dict matches the YAML schema
-    and errors maps service names to error messages for any that failed.
-    """
-    errors: dict[str, str] = {}
-    services: dict = {}
-
-    # ── GuardDuty ─────────────────────────────────────────────────────────────
-    try:
-        gd = _admin_client("guardduty", admin_account, role_name, region)
-        detectors = gd.list_detectors().get("DetectorIds", [])
-        if not detectors:
-            services["guardduty"] = {"enabled": False}
-        else:
-            det = gd.get_detector(DetectorId=detectors[0])
-            enabled = det.get("Status") == "ENABLED"
-            freq = det.get("FindingPublishingFrequency", "SIX_HOURS")
-            auto_enable = "ALL"
-            raw_features: dict[str, str] = {}
+        if to_create:
+            sl.create_data_lake(configurations=to_create, metaStoreManagerRoleArn=meta_role)
+            result.details.append(f"Created in: {', '.join(c['region'] for c in to_create)}")
+        if to_update:
             try:
-                org_cfg = gd.describe_organization_configuration(DetectorId=detectors[0])
-                # Prefer the newer string field; fall back to mapping the deprecated boolean.
-                auto_enable = org_cfg.get("AutoEnableOrganizationMembers") or (
-                    "ALL" if org_cfg.get("AutoEnable") else "NONE"
-                )
-                raw_features = {
-                    f["Name"]: f.get("AutoEnable", "NONE")
-                    for f in org_cfg.get("Features", [])
+                sl.update_data_lake(configurations=to_update, metaStoreManagerRoleArn=meta_role)
+                result.details.append(f"Updated in: {', '.join(c['region'] for c in to_update)}")
+            except ClientError as exc:
+                result.details.append(f"Update skipped: {exc.response['Error']['Message']}")
+
+        # Configure org auto-enable for new accounts
+        if cfg.organization.auto_enable_new_accounts and cfg.sources:
+            auto_enable_conf = [
+                {
+                    "region": r,
+                    "sources": [{"sourceName": s} for s in cfg.sources],
                 }
-            except ClientError:
-                pass
-            protection_plans = {
-                cfg_key: raw_features.get(api_name, "NONE") != "NONE"
-                for cfg_key, api_name in GUARDDUTY_FEATURE_MAP.items()
-            }
-            services["guardduty"] = {
-                "enabled": enabled,
-                "detector": {"finding_publishing_frequency": freq},
-                "organization": {"auto_enable": auto_enable},
-                "protection_plans": protection_plans,
-            }
-    except (ClientError, RuntimeError) as exc:
-        errors["guardduty"] = str(exc)
-        services["guardduty"] = {"enabled": False}
-
-    # ── Security Hub ──────────────────────────────────────────────────────────
-    try:
-        sh = _admin_client("securityhub", admin_account, role_name, region)
-        sh_enabled = False
-        try:
-            sh.describe_hub()
-            sh_enabled = True
-        except ClientError as exc:
-            if exc.response["Error"]["Code"] not in ("InvalidAccessException", "ResourceNotFoundException"):
-                raise
-        if not sh_enabled:
-            services["security_hub"] = {"enabled": False}
-        else:
-            org_cfg = sh.describe_organization_configuration()
-            auto_enable = "ALL" if org_cfg.get("AutoEnable") else "NONE"
-            subs = sh.get_enabled_standards().get("StandardsSubscriptions", [])
-            enabled_arns = {s["StandardsArn"] for s in subs}
-            standards = {
-                key: arn_tmpl.replace("{r}", region) in enabled_arns
-                for key, arn_tmpl in SECURITY_HUB_STANDARD_ARNS.items()
-            }
-            aggs = sh.list_finding_aggregators().get("FindingAggregators", [])
-            services["security_hub"] = {
-                "enabled": True,
-                "organization": {"auto_enable": auto_enable},
-                "standards": standards,
-                "cross_region_aggregation": bool(aggs),
-            }
-    except (ClientError, RuntimeError) as exc:
-        errors["security_hub"] = str(exc)
-        services["security_hub"] = {"enabled": False}
-
-    # ── Macie ─────────────────────────────────────────────────────────────────
-    try:
-        mc = _admin_client("macie2", admin_account, role_name, region)
-        mc_enabled = False
-        freq = "SIX_HOURS"
-        try:
-            session = mc.get_macie_session()
-            mc_enabled = session.get("status") == "ENABLED"
-            freq = session.get("findingPublishingFrequency", "SIX_HOURS")
-        except ClientError:
-            pass
-        if not mc_enabled:
-            services["macie"] = {"enabled": False}
-        else:
-            auto_enable = True
+                for r in cfg.regions
+            ]
             try:
-                org_cfg = mc.describe_organization_configuration()
-                auto_enable = bool(org_cfg.get("autoEnable", True))
-            except ClientError:
-                pass
-            discovery_enabled = False
-            try:
-                disc = mc.get_automated_discovery_configuration()
-                discovery_enabled = disc.get("status") == "ENABLED"
-            except ClientError:
-                pass
-            services["macie"] = {
-                "enabled": True,
-                "organization": {"auto_enable": auto_enable},
-                "session": {"finding_publishing_frequency": freq},
-                "automated_discovery": {
-                    "enabled": discovery_enabled,
-                    "sampling_depth": 100,
-                    "managed_identifiers": "RECOMMENDED",
-                },
-            }
-    except (ClientError, RuntimeError) as exc:
-        errors["macie"] = str(exc)
-        services["macie"] = {"enabled": False}
+                sl.create_data_lake_organization_configuration(
+                    autoEnableNewAccount=auto_enable_conf
+                )
+                result.details.append("Org auto-enable configured.")
+            except ClientError as exc:
+                result.details.append(
+                    f"Org config: {exc.response['Error']['Message']}"
+                )
 
-    # ── Inspector ─────────────────────────────────────────────────────────────
-    try:
-        ins = _admin_client("inspector2", admin_account, role_name, region)
-        ins_enabled = False
-        scan_types = {"ec2": False, "ecr": False, "lambda": False, "lambda_code": False}
-        try:
-            batch = ins.batch_get_account_status(accountIds=[admin_account])
-            resource_state = batch.get("accounts", [{}])[0].get("resourceState", {})
-            scan_types = {
-                "ec2":         resource_state.get("ec2",         {}).get("status") == "ENABLED",
-                "ecr":         resource_state.get("ecr",         {}).get("status") == "ENABLED",
-                "lambda":      resource_state.get("lambda",      {}).get("status") == "ENABLED",
-                "lambda_code": resource_state.get("lambdaCode",  {}).get("status") == "ENABLED",
-            }
-            ins_enabled = any(scan_types.values())
-        except ClientError:
-            pass
-        services["inspector"] = {
-            "enabled": ins_enabled,
-            "organization": {"auto_enable": True},
-            "scan_types": scan_types,
-        }
+        result.success = True
+        result.message = (
+            f"regions=[{', '.join(cfg.regions)}], "
+            f"auto-enable={cfg.organization.auto_enable_new_accounts}, "
+            f"sources=[{', '.join(cfg.sources) or 'none'}]"
+        )
     except (ClientError, RuntimeError) as exc:
-        errors["inspector"] = str(exc)
-        services["inspector"] = {"enabled": False}
+        result.message = str(exc)
+    return result
 
-    # ── Access Analyzer ───────────────────────────────────────────────────────
+
+# ---------------------------------------------------------------------------
+# Status helpers — one per service
+# ---------------------------------------------------------------------------
+
+def _fill_guardduty_status(
+    status: ServiceStatus, admin_account: str, role_name: str, region: str
+) -> None:
+    gd = _admin_client("guardduty", admin_account, role_name, region)
+    detectors = gd.list_detectors().get("DetectorIds", [])
+    if not detectors:
+        return
+    det = gd.get_detector(DetectorId=detectors[0])
+    status.enabled = det.get("Status") == "ENABLED"
+    status.auto_enable = det.get("FindingPublishingFrequency", "—")
     try:
-        aa = _admin_client("accessanalyzer", admin_account, role_name, region)
+        org_cfg = gd.describe_organization_configuration(DetectorId=detectors[0])
+        status.auto_enable = org_cfg.get("AutoEnable", "—")
+    except ClientError:
+        pass
+
+
+def _fill_security_hub_status(
+    status: ServiceStatus, admin_account: str, role_name: str, region: str
+) -> None:
+    sh = _admin_client("securityhub", admin_account, role_name, region)
+    try:
+        sh.describe_hub()
+        status.enabled = True
+        org_cfg = sh.describe_organization_configuration()
+        status.auto_enable = "ALL" if org_cfg.get("AutoEnable") else "NONE"
+        subs = sh.get_enabled_standards().get("StandardsSubscriptions", [])
+        status.details["standards_count"] = str(len(subs))
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "InvalidAccessException":
+            status.enabled = False
+
+
+def _fill_macie_status(
+    status: ServiceStatus, admin_account: str, role_name: str, region: str
+) -> None:
+    mc = _admin_client("macie2", admin_account, role_name, region)
+    try:
+        session = mc.get_macie_session()
+        status.enabled = session.get("status") == "ENABLED"
+        status.auto_enable = str(session.get("findingPublishingFrequency", "—"))
+        org_cfg = mc.describe_organization_configuration()
+        status.auto_enable = str(org_cfg.get("autoEnable", "—"))
+        disc = mc.get_automated_discovery_configuration()
+        status.details["automated_discovery"] = disc.get("status", "—")
+    except ClientError:
+        pass
+
+
+def _fill_inspector_status(
+    status: ServiceStatus, admin_account: str, role_name: str, region: str
+) -> None:
+    ins = _admin_client("inspector2", admin_account, role_name, region)
+    try:
+        org_cfg = ins.describe_organization_configuration()
+        auto = org_cfg.get("autoEnable", {})
+        status.enabled = True
+        status.auto_enable = "ON" if any(auto.values()) else "OFF"
+        status.details = {k: str(v) for k, v in auto.items()}
+    except ClientError:
+        pass
+
+
+def _fill_access_analyzer_status(
+    status: ServiceStatus, admin_account: str, role_name: str, region: str
+) -> None:
+    aa = _admin_client("accessanalyzer", admin_account, role_name, region)
+    try:
         analyzers = aa.list_analyzers().get("analyzers", [])
         org_analyzers = [a for a in analyzers if "ORGANIZATION" in a.get("type", "")]
-        if not org_analyzers:
-            services["access_analyzer"] = {"enabled": False}
-        else:
-            services["access_analyzer"] = {
-                "enabled": True,
-                "analyzers": [{"name": a["name"], "type": a["type"]} for a in org_analyzers],
-            }
-    except (ClientError, RuntimeError) as exc:
-        errors["access_analyzer"] = str(exc)
-        services["access_analyzer"] = {"enabled": False}
-
-    config_dict = {
-        "version": "1",
-        "delegated_admin_account": admin_account,
-        "services": services,
-    }
-    return config_dict, errors
+        status.enabled = bool(org_analyzers)
+        status.auto_enable = "N/A"
+        status.details["analyzers"] = ", ".join(a["name"] for a in org_analyzers) or "none"
+    except ClientError:
+        pass
 
 
-# ---------------------------------------------------------------------------
-# Orchestration
-# ---------------------------------------------------------------------------
-
-def apply_services(
-    config: SecurityServicesConfig,
-    role_name: str,
-    region: str,
-) -> tuple[list[ServiceApplyResult], list[ServiceApplyResult]]:
-    """
-    Run Phase 1 (delegation) and Phase 2 (configuration) for all enabled services.
-    Returns (phase1_results, phase2_results).
-    """
-    admin = config.delegated_admin_account
-    svc_cfg = config.services
-
-    enabled_map = {
-        "guardduty":       (svc_cfg.guardduty.enabled,       svc_cfg.guardduty),
-        "security_hub":    (svc_cfg.security_hub.enabled,     svc_cfg.security_hub),
-        "macie":           (svc_cfg.macie.enabled,            svc_cfg.macie),
-        "inspector":       (svc_cfg.inspector.enabled,        svc_cfg.inspector),
-        "access_analyzer": (svc_cfg.access_analyzer.enabled,  svc_cfg.access_analyzer),
-    }
-
-    # Phase 1 — delegation
-    phase1: list[ServiceApplyResult] = []
-    delegation_check = {d.service: d for d in check_delegated_admins(admin, region)}
-
-    for svc, (enabled, _cfg) in enabled_map.items():
-        if not enabled:
-            continue
-        d = delegation_check.get(svc)
-        if d and d.action == "skip":
-            phase1.append(ServiceApplyResult(
-                service=svc, phase="delegation",
-                success=True, message="Already registered (skipped).",
-            ))
-        elif d and d.action == "conflict":
-            phase1.append(ServiceApplyResult(
-                service=svc, phase="delegation",
-                success=False,
-                message=f"Another account ({d.current_admin}) is already delegated admin.",
-            ))
-        else:
-            phase1.append(register_delegated_admin(svc, admin, region))
-
-    # Abort Phase 2 for services that failed delegation
-    failed_svcs = {r.service for r in phase1 if not r.success}
-
-    # Phase 2 — configuration
-    phase2: list[ServiceApplyResult] = []
-    configurators = {
-        "guardduty":       configure_guardduty,
-        "security_hub":    configure_security_hub,
-        "macie":           configure_macie,
-        "inspector":       configure_inspector,
-        "access_analyzer": configure_access_analyzer,
-    }
-
-    for svc, (enabled, svc_config) in enabled_map.items():
-        if not enabled or svc in failed_svcs:
-            continue
-        phase2.append(configurators[svc](svc_config, admin, role_name, region))
-
-    return phase1, phase2
+def _fill_security_lake_status(
+    status: ServiceStatus, admin_account: str, role_name: str, region: str
+) -> None:
+    sl = _admin_client("securitylake", admin_account, role_name, region)
+    try:
+        lakes = sl.list_data_lakes(regions=[region]).get("dataLakes", [])
+        status.enabled = bool(lakes)
+        status.auto_enable = "N/A"
+        if lakes:
+            status.details["regions"] = ", ".join(dl["region"] for dl in lakes)
+            try:
+                org_cfg = sl.get_data_lake_organization_configuration()
+                auto = org_cfg.get("autoEnableNewAccount", [])
+                status.auto_enable = "ON" if auto else "OFF"
+            except ClientError:
+                pass
+    except ClientError:
+        pass
 
 
 # ---------------------------------------------------------------------------
-# Assessment — per-account member coverage
+# Config readers — one per service
+# ---------------------------------------------------------------------------
+
+def _read_guardduty_config(admin_account: str, role_name: str, region: str) -> dict:
+    gd = _admin_client("guardduty", admin_account, role_name, region)
+    detectors = gd.list_detectors().get("DetectorIds", [])
+    if not detectors:
+        return {"enabled": False}
+    det = gd.get_detector(DetectorId=detectors[0])
+    enabled = det.get("Status") == "ENABLED"
+    freq = det.get("FindingPublishingFrequency", "SIX_HOURS")
+    auto_enable = "ALL"
+    raw_features: dict[str, str] = {}
+    try:
+        org_cfg = gd.describe_organization_configuration(DetectorId=detectors[0])
+        auto_enable = org_cfg.get("AutoEnableOrganizationMembers") or (
+            "ALL" if org_cfg.get("AutoEnable") else "NONE"
+        )
+        raw_features = {
+            f["Name"]: f.get("AutoEnable", "NONE")
+            for f in org_cfg.get("Features", [])
+        }
+    except ClientError:
+        pass
+    protection_plans = {
+        cfg_key: raw_features.get(api_name, "NONE") != "NONE"
+        for cfg_key, api_name in GUARDDUTY_FEATURE_MAP.items()
+    }
+    return {
+        "enabled": enabled,
+        "detector": {"finding_publishing_frequency": freq},
+        "organization": {"auto_enable": auto_enable},
+        "protection_plans": protection_plans,
+    }
+
+
+def _read_security_hub_config(admin_account: str, role_name: str, region: str) -> dict:
+    sh = _admin_client("securityhub", admin_account, role_name, region)
+    sh_enabled = False
+    try:
+        sh.describe_hub()
+        sh_enabled = True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] not in ("InvalidAccessException", "ResourceNotFoundException"):
+            raise
+    if not sh_enabled:
+        return {"enabled": False}
+    org_cfg = sh.describe_organization_configuration()
+    auto_enable = "ALL" if org_cfg.get("AutoEnable") else "NONE"
+    subs = sh.get_enabled_standards().get("StandardsSubscriptions", [])
+    enabled_arns = {s["StandardsArn"] for s in subs}
+    standards = {
+        key: arn_tmpl.replace("{r}", region) in enabled_arns
+        for key, arn_tmpl in SECURITY_HUB_STANDARD_ARNS.items()
+    }
+    aggs = sh.list_finding_aggregators().get("FindingAggregators", [])
+    return {
+        "enabled": True,
+        "organization": {"auto_enable": auto_enable},
+        "standards": standards,
+        "cross_region_aggregation": bool(aggs),
+    }
+
+
+def _read_macie_config(admin_account: str, role_name: str, region: str) -> dict:
+    mc = _admin_client("macie2", admin_account, role_name, region)
+    mc_enabled = False
+    freq = "SIX_HOURS"
+    try:
+        session = mc.get_macie_session()
+        mc_enabled = session.get("status") == "ENABLED"
+        freq = session.get("findingPublishingFrequency", "SIX_HOURS")
+    except ClientError:
+        pass
+    if not mc_enabled:
+        return {"enabled": False}
+    auto_enable = True
+    try:
+        org_cfg = mc.describe_organization_configuration()
+        auto_enable = bool(org_cfg.get("autoEnable", True))
+    except ClientError:
+        pass
+    discovery_enabled = False
+    try:
+        disc = mc.get_automated_discovery_configuration()
+        discovery_enabled = disc.get("status") == "ENABLED"
+    except ClientError:
+        pass
+    return {
+        "enabled": True,
+        "organization": {"auto_enable": auto_enable},
+        "session": {"finding_publishing_frequency": freq},
+        "automated_discovery": {
+            "enabled": discovery_enabled,
+            "sampling_depth": 100,
+            "managed_identifiers": "RECOMMENDED",
+        },
+    }
+
+
+def _read_inspector_config(admin_account: str, role_name: str, region: str) -> dict:
+    ins = _admin_client("inspector2", admin_account, role_name, region)
+    ins_enabled = False
+    scan_types = {"ec2": False, "ecr": False, "lambda": False, "lambda_code": False}
+    try:
+        batch = ins.batch_get_account_status(accountIds=[admin_account])
+        resource_state = batch.get("accounts", [{}])[0].get("resourceState", {})
+        scan_types = {
+            "ec2":         resource_state.get("ec2",         {}).get("status") == "ENABLED",
+            "ecr":         resource_state.get("ecr",         {}).get("status") == "ENABLED",
+            "lambda":      resource_state.get("lambda",      {}).get("status") == "ENABLED",
+            "lambda_code": resource_state.get("lambdaCode",  {}).get("status") == "ENABLED",
+        }
+        ins_enabled = any(scan_types.values())
+    except ClientError:
+        pass
+    return {
+        "enabled": ins_enabled,
+        "organization": {"auto_enable": True},
+        "scan_types": scan_types,
+    }
+
+
+def _read_access_analyzer_config(admin_account: str, role_name: str, region: str) -> dict:
+    aa = _admin_client("accessanalyzer", admin_account, role_name, region)
+    analyzers = aa.list_analyzers().get("analyzers", [])
+    org_analyzers = [a for a in analyzers if "ORGANIZATION" in a.get("type", "")]
+    if not org_analyzers:
+        return {"enabled": False}
+    return {
+        "enabled": True,
+        "analyzers": [{"name": a["name"], "type": a["type"]} for a in org_analyzers],
+    }
+
+
+def _read_security_lake_config(admin_account: str, role_name: str, region: str) -> dict:
+    sl = _admin_client("securitylake", admin_account, role_name, region)
+    lakes = sl.list_data_lakes(regions=[region]).get("dataLakes", [])
+    if not lakes:
+        return {"enabled": False}
+    lake_regions = [dl["region"] for dl in lakes]
+    auto_enable = False
+    sources: list[str] = []
+    try:
+        org_cfg = sl.get_data_lake_organization_configuration()
+        auto_configs = org_cfg.get("autoEnableNewAccount", [])
+        auto_enable = bool(auto_configs)
+        if auto_configs:
+            sources = [s["sourceName"] for s in auto_configs[0].get("sources", [])]
+    except ClientError:
+        pass
+    return {
+        "enabled": True,
+        "regions": lake_regions,
+        "organization": {"auto_enable_new_accounts": auto_enable},
+        "sources": sources,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Member fetchers — services with per-account membership
 # ---------------------------------------------------------------------------
 
 def _members_guardduty(admin_account: str, role_name: str, region: str) -> dict[str, str]:
@@ -901,16 +849,297 @@ def _members_inspector(admin_account: str, role_name: str, region: str) -> dict[
     return members
 
 
-_MEMBER_FETCHERS = {
-    "guardduty":    _members_guardduty,
-    "security_hub": _members_security_hub,
-    "macie":        _members_macie,
-    "inspector":    _members_inspector,
-}
+# ---------------------------------------------------------------------------
+# Registry — the single source of truth for all managed security services
+# ---------------------------------------------------------------------------
+
+SERVICES: list[SecurityService] = [
+    SecurityService(
+        key="guardduty",
+        principal="guardduty.amazonaws.com",
+        delegate_fn=_delegate_guardduty,
+        configure_fn=configure_guardduty,
+        fill_status_fn=_fill_guardduty_status,
+        read_config_fn=_read_guardduty_config,
+        fetch_members_fn=_members_guardduty,
+    ),
+    SecurityService(
+        key="security_hub",
+        principal="securityhub.amazonaws.com",
+        delegate_fn=_delegate_security_hub,
+        configure_fn=configure_security_hub,
+        fill_status_fn=_fill_security_hub_status,
+        read_config_fn=_read_security_hub_config,
+        fetch_members_fn=_members_security_hub,
+    ),
+    SecurityService(
+        key="macie",
+        principal="macie.amazonaws.com",
+        delegate_fn=_delegate_macie,
+        configure_fn=configure_macie,
+        fill_status_fn=_fill_macie_status,
+        read_config_fn=_read_macie_config,
+        fetch_members_fn=_members_macie,
+    ),
+    SecurityService(
+        key="inspector",
+        principal="inspector2.amazonaws.com",
+        delegate_fn=_delegate_inspector,
+        configure_fn=configure_inspector,
+        fill_status_fn=_fill_inspector_status,
+        read_config_fn=_read_inspector_config,
+        fetch_members_fn=_members_inspector,
+    ),
+    SecurityService(
+        key="access_analyzer",
+        principal="access-analyzer.amazonaws.com",
+        delegate_fn=_delegate_access_analyzer,
+        configure_fn=configure_access_analyzer,
+        fill_status_fn=_fill_access_analyzer_status,
+        read_config_fn=_read_access_analyzer_config,
+        fetch_members_fn=None,  # org-wide: no per-account membership
+    ),
+    SecurityService(
+        key="security_lake",
+        principal="securitylake.amazonaws.com",
+        delegate_fn=_delegate_security_lake,
+        configure_fn=configure_security_lake,
+        fill_status_fn=_fill_security_lake_status,
+        read_config_fn=_read_security_lake_config,
+        fetch_members_fn=None,  # org-wide: no per-account membership
+    ),
+]
+
+SERVICE_MAP: dict[str, SecurityService] = {s.key: s for s in SERVICES}
+SERVICE_PRINCIPALS: dict[str, str] = {s.key: s.principal for s in SERVICES}
 
 # These statuses mean the account is actively sending findings to the admin.
 _ENABLED_STATUSES = {"enabled", "active", "member"}
 
+
+# ---------------------------------------------------------------------------
+# Delegation — Phase 1 (called from management account)
+# ---------------------------------------------------------------------------
+
+def check_delegated_admins(target_account: str, region: str) -> list[DelegationStatus]:
+    """
+    Check which services already have a delegated administrator registered,
+    and compute the action needed for each.
+    """
+    org = _state.state.get_client("organizations", region_name=region)
+    statuses: list[DelegationStatus] = []
+
+    for svc in SERVICES:
+        try:
+            resp = org.list_delegated_administrators(ServicePrincipal=svc.principal)
+            admins = resp.get("DelegatedAdministrators", [])
+            current = admins[0]["Id"] if admins else None
+        except ClientError as exc:
+            statuses.append(DelegationStatus(
+                service=svc.key, principal=svc.principal,
+                current_admin=None, target_admin=target_account,
+                action="error", error=exc.response["Error"]["Message"],
+            ))
+            continue
+
+        if current is None:
+            action = "register"
+        elif current == target_account:
+            action = "skip"
+        else:
+            action = "conflict"  # different account already registered
+
+        statuses.append(DelegationStatus(
+            service=svc.key, principal=svc.principal,
+            current_admin=current, target_admin=target_account,
+            action=action,
+        ))
+
+    return statuses
+
+
+def register_delegated_admin(
+    service: str,
+    target_account: str,
+    region: str,
+) -> ServiceApplyResult:
+    """Register the delegated administrator for a single service."""
+    try:
+        SERVICE_MAP[service].delegate_fn(target_account, region)
+        return ServiceApplyResult(
+            service=service, phase="delegation", success=True,
+            message=f"Delegated admin registered: {target_account}",
+        )
+    except ClientError as exc:
+        code = exc.response["Error"]["Code"]
+        # Already registered by another path
+        if code in ("AccountAlreadyRegisteredException", "AlreadyExistsException", "ConflictException"):
+            return ServiceApplyResult(
+                service=service, phase="delegation", success=True,
+                message="Already registered (skipped).",
+            )
+        return ServiceApplyResult(
+            service=service, phase="delegation", success=False,
+            message=exc.response["Error"]["Message"],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Status
+# ---------------------------------------------------------------------------
+
+def get_service_statuses(
+    target_account: str,
+    role_name: str,
+    region: str,
+) -> list[ServiceStatus]:
+    """
+    Read the current live state of each security service.
+    Phase 1 info (delegated admin) comes from the management account.
+    Phase 2 info (service config) comes from the delegated admin account.
+    """
+    delegation = {d.service: d for d in check_delegated_admins(target_account, region)}
+    statuses: list[ServiceStatus] = []
+
+    for svc in SERVICES:
+        d = delegation.get(svc.key)
+        current_admin = d.current_admin if d else None
+        base = ServiceStatus(
+            service=svc.key,
+            delegated_admin=current_admin,
+            enabled=False,
+            auto_enable="—",
+            details={},
+        )
+
+        if current_admin != target_account:
+            base.error = (
+                "Delegated admin not registered" if not current_admin
+                else f"Different admin: {current_admin}"
+            )
+            statuses.append(base)
+            continue
+
+        try:
+            svc.fill_status_fn(base, target_account, role_name, region)
+        except Exception as exc:
+            base.error = str(exc)
+
+        statuses.append(base)
+
+    return statuses
+
+
+def _fill_service_status(
+    status: ServiceStatus,
+    service: str,
+    admin_account: str,
+    role_name: str,
+    region: str,
+) -> None:
+    """Populate the service-specific fields of a ServiceStatus in-place."""
+    SERVICE_MAP[service].fill_status_fn(status, admin_account, role_name, region)
+
+
+# ---------------------------------------------------------------------------
+# Import — read live configuration from delegated admin account
+# ---------------------------------------------------------------------------
+
+def read_service_configs(
+    admin_account: str,
+    role_name: str,
+    region: str,
+) -> tuple[dict, dict[str, str]]:
+    """
+    Read live service configurations from the delegated admin account.
+
+    Returns (config_dict, errors) where config_dict matches the YAML schema
+    and errors maps service names to error messages for any that failed.
+    """
+    errors: dict[str, str] = {}
+    services: dict = {}
+
+    for svc in SERVICES:
+        try:
+            services[svc.key] = svc.read_config_fn(admin_account, role_name, region)
+        except (ClientError, RuntimeError) as exc:
+            errors[svc.key] = str(exc)
+            services[svc.key] = {"enabled": False}
+
+    config_dict = {
+        "version": "1",
+        "delegated_admin_account": admin_account,
+        "services": services,
+    }
+    return config_dict, errors
+
+
+# ---------------------------------------------------------------------------
+# Orchestration
+# ---------------------------------------------------------------------------
+
+def apply_services(
+    config: "SecurityServicesConfig",
+    role_name: str,
+    region: str,
+) -> tuple[list[ServiceApplyResult], list[ServiceApplyResult]]:
+    """
+    Run Phase 1 (delegation) and Phase 2 (configuration) for all enabled services.
+    Returns (phase1_results, phase2_results).
+    """
+    admin = config.delegated_admin_account
+    svc_cfg = config.services
+
+    enabled_map = {
+        svc.key: (getattr(svc_cfg, svc.key).enabled, getattr(svc_cfg, svc.key))
+        for svc in SERVICES
+    }
+
+    # Phase 1 — delegation
+    phase1: list[ServiceApplyResult] = []
+    delegation_check = {d.service: d for d in check_delegated_admins(admin, region)}
+
+    for svc_key, (enabled, _cfg) in enabled_map.items():
+        if not enabled:
+            continue
+        d = delegation_check.get(svc_key)
+        if d and d.action == "skip":
+            phase1.append(ServiceApplyResult(
+                service=svc_key, phase="delegation",
+                success=True, message="Already registered (skipped).",
+            ))
+        elif d and d.action == "conflict":
+            phase1.append(ServiceApplyResult(
+                service=svc_key, phase="delegation",
+                success=False,
+                message=f"Another account ({d.current_admin}) is already delegated admin.",
+            ))
+        else:
+            phase1.append(register_delegated_admin(svc_key, admin, region))
+
+    # Abort Phase 2 for services that failed delegation
+    failed_svcs = {r.service for r in phase1 if not r.success}
+
+    # Phase 2 — configuration
+    # Resolve configure functions via module globals at call time so that
+    # test patches (patch.object on the module attribute) take effect.
+    _module_globals = globals()
+    phase2: list[ServiceApplyResult] = []
+    for svc_key, (enabled, svc_config) in enabled_map.items():
+        if not enabled or svc_key in failed_svcs:
+            continue
+        configure_fn = _module_globals.get(
+            f"configure_{svc_key}",
+            SERVICE_MAP[svc_key].configure_fn,
+        )
+        phase2.append(configure_fn(svc_config, admin, role_name, region))
+
+    return phase1, phase2
+
+
+# ---------------------------------------------------------------------------
+# Assessment — per-account member coverage
+# ---------------------------------------------------------------------------
 
 def assess_member_accounts(
     config: "SecurityServicesConfig",
@@ -921,8 +1150,8 @@ def assess_member_accounts(
     For every active org account report whether each security service is
     enabled and routing findings to the delegated administrator.
 
-    Access Analyzer is org-wide (no per-account membership concept) so it is
-    reported as covered for all non-admin accounts when it is enabled.
+    Services with ``fetch_members_fn=None`` are org-wide and reported as
+    covered for all accounts when enabled (no per-account membership concept).
     """
     from standstill.aws.organizations import all_accounts, build_ou_tree
 
@@ -936,28 +1165,32 @@ def assess_member_accounts(
     org_client = _state.state.get_client("organizations")
     mgmt_id: str = org_client.describe_organization()["Organization"]["MasterAccountId"]
 
-    # Concurrently fetch member lists for every enabled service.
-    enabled_fetchers: dict[str, tuple] = {
-        svc: (fn, admin, role_name, region)
-        for svc, fn in _MEMBER_FETCHERS.items()
-        if getattr(svc_cfg, svc).enabled
-    }
+    # Partition into per-account membership services vs org-wide services
+    member_svcs = [
+        svc for svc in SERVICES
+        if svc.fetch_members_fn is not None and getattr(svc_cfg, svc.key).enabled
+    ]
+    org_wide_svcs = [
+        svc for svc in SERVICES
+        if svc.fetch_members_fn is None and getattr(svc_cfg, svc.key).enabled
+    ]
 
+    # Concurrently fetch member lists for every enabled membership service
     raw_members: dict[str, dict[str, str]] = {}
     service_errors: dict[str, str] = {}
 
     with ThreadPoolExecutor(max_workers=5) as pool:
         futures = {
-            pool.submit(fn, *args): svc
-            for svc, (fn, *args) in enabled_fetchers.items()
+            pool.submit(svc.fetch_members_fn, admin, role_name, region): svc.key
+            for svc in member_svcs
         }
         for future in as_completed(futures):
-            svc = futures[future]
+            svc_key = futures[future]
             try:
-                raw_members[svc] = future.result()
+                raw_members[svc_key] = future.result()
             except Exception as exc:
-                service_errors[svc] = str(exc)
-                raw_members[svc] = {}
+                service_errors[svc_key] = str(exc)
+                raw_members[svc_key] = {}
 
     results: list[AccountAssessment] = []
 
@@ -969,51 +1202,40 @@ def assess_member_accounts(
         )
 
         # Management account and delegated admin cannot be members of their own org.
-        if acct.id == admin:
-            for svc in enabled_fetchers:
-                assessment.services[svc] = MemberServiceStatus(
-                    enabled=True, member_status="delegated_admin"
+        if acct.id in (admin, mgmt_id):
+            sentinel = "delegated_admin" if acct.id == admin else "management_account"
+            for svc in member_svcs:
+                assessment.services[svc.key] = MemberServiceStatus(
+                    enabled=True, member_status=sentinel
                 )
-            if svc_cfg.access_analyzer.enabled:
-                assessment.services["access_analyzer"] = MemberServiceStatus(
-                    enabled=True, member_status="delegated_admin"
-                )
-            results.append(assessment)
-            continue
-
-        if acct.id == mgmt_id:
-            for svc in enabled_fetchers:
-                assessment.services[svc] = MemberServiceStatus(
-                    enabled=True, member_status="management_account"
-                )
-            if svc_cfg.access_analyzer.enabled:
-                assessment.services["access_analyzer"] = MemberServiceStatus(
-                    enabled=True, member_status="management_account"
+            for svc in org_wide_svcs:
+                assessment.services[svc.key] = MemberServiceStatus(
+                    enabled=True, member_status=sentinel
                 )
             results.append(assessment)
             continue
 
-        # Regular member accounts.
-        for svc in enabled_fetchers:
-            if svc in service_errors:
-                assessment.services[svc] = MemberServiceStatus(
-                    enabled=False, member_status="error", error=service_errors[svc]
+        # Regular member accounts — per-service membership
+        for svc in member_svcs:
+            if svc.key in service_errors:
+                assessment.services[svc.key] = MemberServiceStatus(
+                    enabled=False, member_status="error", error=service_errors[svc.key]
                 )
             else:
-                raw = raw_members.get(svc, {}).get(acct.id)
+                raw = raw_members.get(svc.key, {}).get(acct.id)
                 if raw is None:
-                    assessment.services[svc] = MemberServiceStatus(
+                    assessment.services[svc.key] = MemberServiceStatus(
                         enabled=False, member_status="not_member"
                     )
                 else:
                     is_enabled = raw.lower() in _ENABLED_STATUSES
-                    assessment.services[svc] = MemberServiceStatus(
+                    assessment.services[svc.key] = MemberServiceStatus(
                         enabled=is_enabled, member_status=raw
                     )
 
-        # Access Analyzer: org-wide analyzer covers all accounts automatically.
-        if svc_cfg.access_analyzer.enabled:
-            assessment.services["access_analyzer"] = MemberServiceStatus(
+        # Org-wide services cover all accounts automatically
+        for svc in org_wide_svcs:
+            assessment.services[svc.key] = MemberServiceStatus(
                 enabled=True, member_status="org_wide"
             )
 

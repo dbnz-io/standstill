@@ -112,6 +112,7 @@ def init(
     configure_mc  = typer.confirm("  Configure Macie?",            default=True)
     configure_ins = typer.confirm("  Configure Inspector?",        default=True)
     configure_aa  = typer.confirm("  Configure Access Analyzer?",  default=True)
+    configure_sl  = typer.confirm("  Configure Security Lake?",    default=False)
 
     # ── Start from existing raw config or blank ──────────────────────────────
     cfg: dict = dict(existing_raw) if existing_raw else {"version": "1", "services": {}}
@@ -285,6 +286,79 @@ def init(
                 )
             services["access_analyzer"]["analyzers"] = analyzers
 
+    # ── Security Lake ────────────────────────────────────────────────────────
+    if configure_sl:
+        ex = existing.services.security_lake if existing else None
+        console.print("\n[bold cyan]Security Lake[/bold cyan]")
+        console.print(
+            "[dim]Centralised security data lake for org-wide log aggregation.\n"
+            "Cost: storage + data ingestion; varies significantly by log volume.[/dim]"
+        )
+        sl_enabled = typer.confirm("Enable Security Lake?", default=ex.enabled if ex else False)
+        services["security_lake"] = {"enabled": sl_enabled}
+        if sl_enabled:
+            default_regions = ", ".join(ex.regions) if ex else (
+                _state.state.region or "us-east-1"
+            )
+            regions_raw = typer.prompt(
+                "Regions (comma-separated)",
+                default=default_regions,
+            )
+            regions = [r.strip() for r in regions_raw.split(",") if r.strip()]
+
+            lc = ex.lifecycle if ex else None
+            console.print("[dim]Lifecycle: set expiration_days=0 to disable, transition_days=0 to skip transition.[/dim]")
+            expiration = typer.prompt(
+                "Expiration days (0 = disabled)",
+                default=lc.expiration_days if lc else 365,
+                type=int,
+            )
+            transition = typer.prompt(
+                "Transition days (0 = disabled)",
+                default=lc.transition_days if lc else 0,
+                type=int,
+            )
+            storage_class = lc.transition_storage_class if lc else "INTELLIGENT_TIERING"
+            if transition > 0:
+                storage_class = typer.prompt(
+                    "Transition storage class",
+                    default=storage_class,
+                    type=click.Choice(
+                        ["STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING",
+                         "GLACIER_INSTANT_RETRIEVAL", "GLACIER_FLEXIBLE_RETRIEVAL", "DEEP_ARCHIVE"],
+                        case_sensitive=False,
+                    ),
+                ).upper()
+
+            auto_enable = typer.confirm(
+                "Auto-enable for new org accounts?",
+                default=ex.organization.auto_enable_new_accounts if ex else True,
+            )
+
+            default_sources = ", ".join(ex.sources) if ex else (
+                "CLOUD_TRAIL_MGMT, ROUTE53, SH_FINDINGS, VPC_FLOW"
+            )
+            console.print(
+                "[dim]Sources: CLOUD_TRAIL_MGMT, ROUTE53, SH_FINDINGS, VPC_FLOW, "
+                "EKS_AUDIT, LAMBDA_EXECUTION, S3_DATA, WAFV2[/dim]"
+            )
+            sources_raw = typer.prompt(
+                "Sources to auto-enable (comma-separated)",
+                default=default_sources,
+            )
+            sources = [s.strip().upper() for s in sources_raw.split(",") if s.strip()]
+
+            services["security_lake"].update({
+                "regions": regions,
+                "organization": {"auto_enable_new_accounts": auto_enable},
+                "lifecycle": {
+                    "expiration_days": max(0, expiration),
+                    "transition_days": max(0, transition),
+                    "transition_storage_class": storage_class,
+                },
+                "sources": sources,
+            })
+
     # ── Write file ───────────────────────────────────────────────────────────
     header = (
         "# Standstill — Security Services Configuration\n"
@@ -311,6 +385,7 @@ _SVC_LABELS_IMPORT = {
     "macie":           "Macie",
     "inspector":       "Inspector",
     "access_analyzer": "Access Analyzer",
+    "security_lake":   "Security Lake",
 }
 
 
@@ -644,6 +719,7 @@ def assess(
             ("macie",           svc_cfg.macie.enabled),
             ("inspector",       svc_cfg.inspector.enabled),
             ("access_analyzer", svc_cfg.access_analyzer.enabled),
+            ("security_lake",   svc_cfg.security_lake.enabled),
         ]
         if enabled
     ]

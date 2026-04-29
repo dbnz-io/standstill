@@ -14,6 +14,7 @@ from standstill.models.security_config import (
     InspectorConfig,
     MacieConfig,
     SecurityHubConfig,
+    SecurityLakeConfig,
     SecurityServicesConfig,
     ServicesConfig,
 )
@@ -95,6 +96,7 @@ class TestRegisterDelegatedAdmin:
                 "macie": "enable_organization_admin_account",
                 "inspector": "enable_delegated_admin_account",
                 "access_analyzer": "register_delegated_administrator",
+                "security_lake": "register_data_lake_delegated_administrator",
             }[service_name]).side_effect = side_effect
         return m
 
@@ -122,12 +124,25 @@ class TestRegisterDelegatedAdmin:
         result = self._register("access_analyzer", self._mock_client("access_analyzer"))
         assert result.success
 
+    def test_security_lake_success(self):
+        result = self._register("security_lake", self._mock_client("security_lake"))
+        assert result.success
+
     def test_already_registered_is_success(self):
         m = MagicMock()
         m.enable_organization_admin_account.side_effect = _client_error(
             "AccountAlreadyRegisteredException"
         )
         result = self._register("guardduty", m)
+        assert result.success
+        assert "Already registered" in result.message
+
+    def test_security_lake_conflict_is_success(self):
+        m = MagicMock()
+        m.register_data_lake_delegated_administrator.side_effect = _client_error(
+            "ConflictException"
+        )
+        result = self._register("security_lake", m)
         assert result.success
         assert "Already registered" in result.message
 
@@ -325,6 +340,134 @@ class TestConfigureAccessAnalyzer:
 
 
 # ---------------------------------------------------------------------------
+# configure_security_lake
+# ---------------------------------------------------------------------------
+
+class TestConfigureSecurityLake:
+    def _mock_sl(self, existing_regions=None):
+        m = MagicMock()
+        lakes = [{"region": r} for r in (existing_regions or [])]
+        m.list_data_lakes.return_value = {"dataLakes": lakes}
+        m.get_data_lake_organization_configuration.return_value = {"autoEnableNewAccount": []}
+        return m
+
+    def test_creates_new_lake(self):
+        mock_sl = self._mock_sl(existing_regions=[])
+        with patch.object(sec, "_admin_client", return_value=mock_sl):
+            result = sec.configure_security_lake(
+                SecurityLakeConfig(enabled=True), "admin", "Role", "us-east-1"
+            )
+        assert result.success
+        mock_sl.create_data_lake.assert_called_once()
+        mock_sl.update_data_lake.assert_not_called()
+
+    def test_updates_existing_lake(self):
+        mock_sl = self._mock_sl(existing_regions=["us-east-1"])
+        with patch.object(sec, "_admin_client", return_value=mock_sl):
+            result = sec.configure_security_lake(
+                SecurityLakeConfig(enabled=True), "admin", "Role", "us-east-1"
+            )
+        assert result.success
+        mock_sl.create_data_lake.assert_not_called()
+        mock_sl.update_data_lake.assert_called_once()
+
+    def test_org_auto_enable_configured(self):
+        mock_sl = self._mock_sl()
+        with patch.object(sec, "_admin_client", return_value=mock_sl):
+            result = sec.configure_security_lake(
+                SecurityLakeConfig(enabled=True, sources=["CLOUD_TRAIL_MGMT"]),
+                "admin", "Role", "us-east-1",
+            )
+        assert result.success
+        mock_sl.create_data_lake_organization_configuration.assert_called_once()
+        call_kwargs = mock_sl.create_data_lake_organization_configuration.call_args[1]
+        assert any(
+            s["sourceName"] == "CLOUD_TRAIL_MGMT"
+            for entry in call_kwargs["autoEnableNewAccount"]
+            for s in entry["sources"]
+        )
+
+    def test_no_auto_enable_when_disabled(self):
+        from standstill.models.security_config import SecurityLakeOrg
+        mock_sl = self._mock_sl()
+        cfg = SecurityLakeConfig(
+            enabled=True,
+            organization=SecurityLakeOrg(auto_enable_new_accounts=False),
+        )
+        with patch.object(sec, "_admin_client", return_value=mock_sl):
+            result = sec.configure_security_lake(cfg, "admin", "Role", "us-east-1")
+        assert result.success
+        mock_sl.create_data_lake_organization_configuration.assert_not_called()
+
+    def test_default_meta_role_derived_from_account(self):
+        mock_sl = self._mock_sl()
+        with patch.object(sec, "_admin_client", return_value=mock_sl):
+            sec.configure_security_lake(
+                SecurityLakeConfig(enabled=True), "123456789012", "Role", "us-east-1"
+            )
+        call_kwargs = mock_sl.create_data_lake.call_args[1]
+        assert call_kwargs["metaStoreManagerRoleArn"] == (
+            "arn:aws:iam::123456789012:role/AmazonSecurityLakeMetaStoreManagerV2"
+        )
+
+    def test_custom_meta_role_used(self):
+        mock_sl = self._mock_sl()
+        custom_arn = "arn:aws:iam::123456789012:role/MyCustomRole"
+        cfg = SecurityLakeConfig(enabled=True, meta_store_manager_role_arn=custom_arn)
+        with patch.object(sec, "_admin_client", return_value=mock_sl):
+            sec.configure_security_lake(cfg, "123456789012", "Role", "us-east-1")
+        call_kwargs = mock_sl.create_data_lake.call_args[1]
+        assert call_kwargs["metaStoreManagerRoleArn"] == custom_arn
+
+    def test_lifecycle_included_when_set(self):
+        from standstill.models.security_config import SecurityLakeLifecycle
+        mock_sl = self._mock_sl()
+        cfg = SecurityLakeConfig(
+            enabled=True,
+            lifecycle=SecurityLakeLifecycle(expiration_days=90, transition_days=30),
+        )
+        with patch.object(sec, "_admin_client", return_value=mock_sl):
+            sec.configure_security_lake(cfg, "admin", "Role", "us-east-1")
+        confs = mock_sl.create_data_lake.call_args[1]["configurations"]
+        assert "lifecycleConfiguration" in confs[0]
+        lc = confs[0]["lifecycleConfiguration"]
+        assert lc["expiration"]["days"] == 90
+        assert lc["transitions"][0]["days"] == 30
+
+    def test_lifecycle_omitted_when_zero(self):
+        from standstill.models.security_config import SecurityLakeLifecycle
+        mock_sl = self._mock_sl()
+        cfg = SecurityLakeConfig(
+            enabled=True,
+            lifecycle=SecurityLakeLifecycle(expiration_days=0, transition_days=0),
+        )
+        with patch.object(sec, "_admin_client", return_value=mock_sl):
+            sec.configure_security_lake(cfg, "admin", "Role", "us-east-1")
+        confs = mock_sl.create_data_lake.call_args[1]["configurations"]
+        assert "lifecycleConfiguration" not in confs[0]
+
+    def test_runtime_error(self):
+        with patch.object(sec, "_admin_client", side_effect=RuntimeError("no creds")):
+            result = sec.configure_security_lake(
+                SecurityLakeConfig(enabled=True), "admin", "Role", "us-east-1"
+            )
+        assert not result.success
+        assert "no creds" in result.message
+
+    def test_org_config_conflict_does_not_fail(self):
+        mock_sl = self._mock_sl()
+        mock_sl.create_data_lake_organization_configuration.side_effect = _client_error(
+            "ConflictException", "already exists"
+        )
+        with patch.object(sec, "_admin_client", return_value=mock_sl):
+            result = sec.configure_security_lake(
+                SecurityLakeConfig(enabled=True), "admin", "Role", "us-east-1"
+            )
+        # Conflict on org config is logged as a detail, not a fatal error
+        assert result.success
+
+
+# ---------------------------------------------------------------------------
 # apply_services
 # ---------------------------------------------------------------------------
 
@@ -353,6 +496,7 @@ class TestApplyServices:
             patch.object(sec, "configure_macie", return_value=mock_result),
             patch.object(sec, "configure_inspector", return_value=mock_result),
             patch.object(sec, "configure_access_analyzer", return_value=mock_result),
+            patch.object(sec, "configure_security_lake", return_value=mock_result),
         ):
             p1, p2 = sec.apply_services(config, "Role", "us-east-1")
         assert all(r.success for r in p1)
@@ -379,16 +523,16 @@ class TestApplyServices:
             delegated_admin_account="123456789012",
             services=ServicesConfig(guardduty=GuardDutyConfig(enabled=False)),
         )
-        with patch.object(sec, "check_delegated_admins", return_value=self._all_skip_delegation()):
-            with patch.object(sec, "configure_security_hub") as mock_sh:
-                mock_sh.return_value = sec.ServiceApplyResult("security_hub", "configuration", True, "ok")
-                with patch.object(sec, "configure_macie") as mock_mc:
-                    mock_mc.return_value = sec.ServiceApplyResult("macie", "configuration", True, "ok")
-                    with patch.object(sec, "configure_inspector") as mock_ins:
-                        mock_ins.return_value = sec.ServiceApplyResult("inspector", "configuration", True, "ok")
-                        with patch.object(sec, "configure_access_analyzer") as mock_aa:
-                            mock_aa.return_value = sec.ServiceApplyResult("access_analyzer", "configuration", True, "ok")
-                            p1, p2 = sec.apply_services(config, "Role", "us-east-1")
+        ok = sec.ServiceApplyResult("x", "configuration", True, "ok")
+        with (
+            patch.object(sec, "check_delegated_admins", return_value=self._all_skip_delegation()),
+            patch.object(sec, "configure_security_hub", return_value=ok),
+            patch.object(sec, "configure_macie", return_value=ok),
+            patch.object(sec, "configure_inspector", return_value=ok),
+            patch.object(sec, "configure_access_analyzer", return_value=ok),
+            patch.object(sec, "configure_security_lake", return_value=ok),
+        ):
+            p1, p2 = sec.apply_services(config, "Role", "us-east-1")
         gd_p2 = [r for r in p2 if r.service == "guardduty"]
         assert gd_p2 == []
 

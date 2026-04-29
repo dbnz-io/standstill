@@ -667,3 +667,191 @@ class TestAccountFactoryUnit:
         assert info["ParentId"] == "r-ab12"
         assert len(info["ChildOUs"]) == 1
         assert info["ChildOUs"][0]["Id"] == "ou-child-1111"
+
+
+# ===========================================================================
+# accounts set-profile
+# ===========================================================================
+
+class TestSetProfile:
+    _CREDS = {
+        "AccessKeyId":     "ASIAIOSFODNN7EXAMPLE",
+        "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "SessionToken":    "AQoXnyc4lcK4w",
+        "Expiration":      "2099-01-01T00:00:00Z",
+    }
+
+    def _mock_state(self, mock_state, account_id="123456789012"):
+        sts_mock = MagicMock()
+        sts_mock.assume_role.return_value = {"Credentials": self._CREDS}
+        mock_state.state.get_client.return_value = sts_mock
+        mock_state.state.region = "us-east-1"
+
+    def test_set_profile_by_account_id(self, tmp_path):
+        with (
+            patch("standstill.commands.accounts._state") as mock_state,
+            patch("standstill.commands.accounts.Path.home", return_value=tmp_path),
+        ):
+            self._mock_state(mock_state)
+            result = runner.invoke(
+                app,
+                ["accounts", "set-profile",
+                 "--account", "123456789012",
+                 "--profile", "staging"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "ss-staging" in result.output
+
+    def test_credentials_file_written(self, tmp_path):
+        import configparser
+
+        with (
+            patch("standstill.commands.accounts._state") as mock_state,
+            patch("standstill.commands.accounts.Path.home", return_value=tmp_path),
+        ):
+            self._mock_state(mock_state)
+            runner.invoke(
+                app,
+                ["accounts", "set-profile",
+                 "--account", "123456789012",
+                 "--profile", "staging"],
+            )
+
+        creds_path = tmp_path / ".aws" / "credentials"
+        assert creds_path.exists()
+        cfg = configparser.RawConfigParser()
+        cfg.read(creds_path)
+        assert cfg.has_section("ss-staging")
+        assert cfg.get("ss-staging", "aws_access_key_id") == self._CREDS["AccessKeyId"]
+        assert cfg.get("ss-staging", "aws_session_token") == self._CREDS["SessionToken"]
+
+    def test_config_file_written(self, tmp_path):
+        import configparser
+
+        with (
+            patch("standstill.commands.accounts._state") as mock_state,
+            patch("standstill.commands.accounts.Path.home", return_value=tmp_path),
+        ):
+            self._mock_state(mock_state)
+            runner.invoke(
+                app,
+                ["accounts", "set-profile",
+                 "--account", "123456789012",
+                 "--profile", "staging",
+                 "--region", "eu-west-1"],
+            )
+
+        cfg_path = tmp_path / ".aws" / "config"
+        assert cfg_path.exists()
+        cfg = configparser.RawConfigParser()
+        cfg.read(cfg_path)
+        assert cfg.has_section("profile ss-staging")
+        assert cfg.get("profile ss-staging", "region") == "eu-west-1"
+
+    def test_set_profile_by_account_name(self, tmp_path):
+        from standstill.aws.organizations import Account
+
+        fake_account = Account(
+            id="111222333444",
+            arn="arn:aws:organizations::000000000000:account/o-xxx/111222333444",
+            name="Production",
+            email="prod@example.com",
+            status="ACTIVE",
+            ou_id="ou-root-1234",
+            ou_name="Root",
+        )
+
+        with (
+            patch("standstill.commands.accounts._state") as mock_state,
+            patch("standstill.commands.accounts.org_api.build_ou_tree", return_value=[]),
+            patch("standstill.commands.accounts.org_api.all_accounts",
+                  return_value=[fake_account]),
+            patch("standstill.commands.accounts.Path.home", return_value=tmp_path),
+        ):
+            self._mock_state(mock_state, "111222333444")
+            result = runner.invoke(
+                app,
+                ["accounts", "set-profile",
+                 "--account", "Production",
+                 "--profile", "prod"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "ss-prod" in result.output
+
+    def test_unresolvable_account_exits_1(self, tmp_path):
+        with (
+            patch("standstill.commands.accounts._state"),
+            patch("standstill.commands.accounts.org_api.build_ou_tree", return_value=[]),
+            patch("standstill.commands.accounts.org_api.all_accounts", return_value=[]),
+            patch("standstill.commands.accounts.Path.home", return_value=tmp_path),
+        ):
+            result = runner.invoke(
+                app,
+                ["accounts", "set-profile",
+                 "--account", "NonExistentAccount",
+                 "--profile", "test"],
+            )
+
+        assert result.exit_code == 1
+
+    def test_assume_role_failure_exits_1(self, tmp_path):
+        from botocore.exceptions import ClientError
+
+        error = ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": "Not authorized"}},
+            "AssumeRole",
+        )
+        with (
+            patch("standstill.commands.accounts._state") as mock_state,
+            patch("standstill.commands.accounts.Path.home", return_value=tmp_path),
+        ):
+            sts_mock = MagicMock()
+            sts_mock.assume_role.side_effect = error
+            mock_state.state.get_client.return_value = sts_mock
+            mock_state.state.region = "us-east-1"
+            result = runner.invoke(
+                app,
+                ["accounts", "set-profile",
+                 "--account", "123456789012",
+                 "--profile", "test"],
+            )
+
+        assert result.exit_code == 1
+        assert "Not authorized" in result.output
+
+    def test_existing_profile_is_overwritten(self, tmp_path):
+        import configparser
+
+        # Pre-populate the credentials file with an existing profile
+        aws_dir = tmp_path / ".aws"
+        aws_dir.mkdir(parents=True)
+        existing = configparser.RawConfigParser()
+        existing.add_section("ss-staging")
+        existing.set("ss-staging", "aws_access_key_id", "OLD_KEY")
+        with (aws_dir / "credentials").open("w") as fh:
+            existing.write(fh)
+
+        with (
+            patch("standstill.commands.accounts._state") as mock_state,
+            patch("standstill.commands.accounts.Path.home", return_value=tmp_path),
+        ):
+            self._mock_state(mock_state)
+            result = runner.invoke(
+                app,
+                ["accounts", "set-profile",
+                 "--account", "123456789012",
+                 "--profile", "staging"],
+            )
+
+        assert result.exit_code == 0
+        assert "updated existing" in result.output
+
+        cfg = configparser.RawConfigParser()
+        cfg.read(aws_dir / "credentials")
+        assert cfg.get("ss-staging", "aws_access_key_id") == self._CREDS["AccessKeyId"]
+
+    def test_missing_required_args(self):
+        result = runner.invoke(app, ["accounts", "set-profile"])
+        assert result.exit_code != 0

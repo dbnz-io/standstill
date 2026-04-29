@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import configparser
+import re
 import time
 from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
+from botocore.exceptions import ClientError
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -423,8 +426,196 @@ def describe_account(
 
 
 # ---------------------------------------------------------------------------
+# set-profile
+# ---------------------------------------------------------------------------
+
+@app.command("set-profile")
+def set_profile(
+    account: Annotated[
+        str,
+        typer.Option("--account", "-a",
+                     help="Account ID (12-digit) or account name."),
+    ],
+    profile: Annotated[
+        str,
+        typer.Option("--profile", "-p",
+                     help="Profile suffix. Credentials are written as 'ss-{name}'."),
+    ],
+    role_name: Annotated[
+        str,
+        typer.Option("--role-name", "-n",
+                     help="IAM role to assume in the target account."),
+    ] = _DEFAULT_CT_ROLE,
+    region: Annotated[
+        Optional[str],
+        typer.Option("--region", "-r",
+                     help="AWS region stored in the profile (default: current region)."),
+    ] = None,
+    duration: Annotated[
+        int,
+        typer.Option("--duration", "-d",
+                     help="Session duration in seconds (900–43200, default 3600)."),
+    ] = 3600,
+) -> None:
+    """
+    Assume the Control Tower execution role in a member account and write
+    the resulting temporary credentials as a named AWS CLI profile.
+
+    The profile is stored as [bold cyan]ss-{profile}[/bold cyan] in
+    ~/.aws/credentials and ~/.aws/config so you can immediately target
+    the account with any AWS tool or standstill itself.
+
+    Accepts either a 12-digit account ID or the account name as registered
+    in the organization — standstill resolves the name automatically.
+
+    \b
+    Examples:
+      standstill accounts set-profile --account 123456789012 --profile prod
+      standstill accounts set-profile --account "Production" --profile prod
+      standstill accounts set-profile --account 123456789012 --profile prod --region eu-west-1
+      # Then use it:
+      standstill --profile ss-prod cost report
+      aws s3 ls --profile ss-prod
+    """
+    # ── Resolve account ID ──────────────────────────────────────────────────
+    with renderer.console.status("[bold]Resolving account...[/bold]"):
+        account_id = _resolve_account_id(account)
+
+    if not account_id:
+        err.print(
+            f"[bold red]Error:[/bold red] Could not resolve '{account}' to an account ID.\n"
+            "[dim]Provide a 12-digit account ID or the exact account name from Organizations.[/dim]"
+        )
+        raise typer.Exit(1)
+
+    profile_name    = f"ss-{profile}"
+    role_arn        = f"arn:aws:iam::{account_id}:role/{role_name}"
+    effective_region = region or _state.state.region or "us-east-1"
+    duration_clamped = max(900, min(duration, 43200))
+
+    renderer.console.print(
+        f"[bold]Account:[/bold]  [cyan]{account_id}[/cyan]"
+        + (f"  [dim]({account})[/dim]" if account != account_id else "")
+    )
+    renderer.console.print(f"[bold]Role:[/bold]     [dim]{role_arn}[/dim]")
+    renderer.console.print(f"[bold]Profile:[/bold]  [bold cyan]{profile_name}[/bold cyan]\n")
+
+    # ── Assume role ─────────────────────────────────────────────────────────
+    try:
+        with renderer.console.status("[bold]Assuming role...[/bold]"):
+            sts  = _state.state.get_client("sts")
+            resp = sts.assume_role(
+                RoleArn=role_arn,
+                RoleSessionName=f"standstill-{profile}",
+                DurationSeconds=duration_clamped,
+            )
+    except ClientError as e:
+        err.print(f"[bold red]Error:[/bold red] {e.response['Error']['Message']}")
+        raise typer.Exit(1)
+
+    creds  = resp["Credentials"]
+    expiry = creds["Expiration"]
+
+    # ── Write ~/.aws/credentials ─────────────────────────────────────────────
+    creds_path = Path.home() / ".aws" / "credentials"
+    existed    = _profile_exists(creds_path, profile_name)
+    _write_credentials(creds_path, profile_name, creds)
+
+    # ── Write ~/.aws/config ──────────────────────────────────────────────────
+    config_path = Path.home() / ".aws" / "config"
+    _write_config(config_path, profile_name, effective_region)
+
+    # ── Summary ──────────────────────────────────────────────────────────────
+    overwrite_note = " [yellow](updated existing profile)[/yellow]" if existed else ""
+    renderer.console.print(
+        f"[bold green]✓[/bold green] Profile [bold cyan]{profile_name}[/bold cyan] "
+        f"written to ~/.aws/credentials{overwrite_note}"
+    )
+
+    if hasattr(expiry, "strftime"):
+        expiry_str = expiry.strftime("%Y-%m-%d %H:%M:%S UTC")
+    else:
+        expiry_str = str(expiry)
+
+    t = Table(show_header=False, box=box.SIMPLE, padding=(0, 2))
+    t.add_column(style="bold dim")
+    t.add_column()
+    t.add_row("Region",  effective_region)
+    t.add_row("Expires", f"[yellow]{expiry_str}[/yellow]")
+    t.add_row("Session", f"standstill-{profile}")
+    renderer.console.print(t)
+
+    renderer.console.print(
+        "\n[bold]Use it with:[/bold]\n"
+        f"  [cyan]standstill --profile {profile_name} cost report[/cyan]\n"
+        f"  [cyan]aws sts get-caller-identity --profile {profile_name}[/cyan]"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_account_id(account: str) -> str | None:
+    """
+    Return a 12-digit account ID.
+    Accepts either a raw ID or an account name (case-insensitive lookup via Organizations).
+    """
+    if re.fullmatch(r"\d{12}", account):
+        return account
+    try:
+        nodes    = org_api.build_ou_tree()
+        accounts = org_api.all_accounts(nodes)
+        for acct in accounts:
+            if acct.name.lower() == account.lower():
+                return acct.id
+    except Exception:
+        pass
+    return None
+
+
+def _profile_exists(path: Path, profile_name: str) -> bool:
+    if not path.exists():
+        return False
+    cfg = configparser.RawConfigParser()
+    cfg.read(path)
+    return cfg.has_section(profile_name)
+
+
+def _write_credentials(path: Path, profile_name: str, creds: dict) -> None:
+    """
+    Upsert [profile_name] in ~/.aws/credentials with temporary STS credentials.
+    Uses RawConfigParser to avoid % interpolation issues in session tokens.
+    """
+    cfg = configparser.RawConfigParser()
+    if path.exists():
+        cfg.read(path)
+    if not cfg.has_section(profile_name):
+        cfg.add_section(profile_name)
+    cfg.set(profile_name, "aws_access_key_id",     creds["AccessKeyId"])
+    cfg.set(profile_name, "aws_secret_access_key", creds["SecretAccessKey"])
+    cfg.set(profile_name, "aws_session_token",     creds["SessionToken"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as fh:
+        cfg.write(fh)
+
+
+def _write_config(path: Path, profile_name: str, region: str) -> None:
+    """
+    Upsert [profile {profile_name}] in ~/.aws/config with region and output format.
+    """
+    cfg     = configparser.RawConfigParser()
+    section = f"profile {profile_name}"
+    if path.exists():
+        cfg.read(path)
+    if not cfg.has_section(section):
+        cfg.add_section(section)
+    cfg.set(section, "region", region)
+    cfg.set(section, "output", "json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as fh:
+        cfg.write(fh)
 
 def _run_blueprint_on_account(blueprint_path: Path, account_id: str, region: str) -> None:
     """Load a blueprint and apply it to a known account ID. Prints results inline."""

@@ -11,6 +11,14 @@ _VALID_FREQ = {"FIFTEEN_MINUTES", "ONE_HOUR", "SIX_HOURS"}
 _VALID_AUTO_ENABLE_ORG = {"ALL", "NEW", "NONE"}
 _VALID_MANAGED_IDENTIFIERS = {"RECOMMENDED", "ALL", "NONE", "EXCLUDE", "INCLUDE"}
 _VALID_ANALYZER_TYPES = {"ORGANIZATION", "ORGANIZATION_UNUSED_ACCESS"}
+_VALID_LAKE_SOURCES = {
+    "CLOUD_TRAIL_MGMT", "ROUTE53", "SH_FINDINGS", "VPC_FLOW",
+    "EKS_AUDIT", "LAMBDA_EXECUTION", "S3_DATA", "WAFV2",
+}
+_VALID_LAKE_STORAGE_CLASSES = {
+    "STANDARD", "STANDARD_IA", "ONEZONE_IA", "INTELLIGENT_TIERING",
+    "GLACIER_INSTANT_RETRIEVAL", "GLACIER_FLEXIBLE_RETRIEVAL", "DEEP_ARCHIVE",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +197,46 @@ class AccessAnalyzerConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Security Lake
+# ---------------------------------------------------------------------------
+
+class SecurityLakeOrg(BaseModel):
+    auto_enable_new_accounts: bool = True
+
+
+class SecurityLakeLifecycle(BaseModel):
+    expiration_days: int = 365
+    transition_days: int = 0
+    transition_storage_class: str = "INTELLIGENT_TIERING"
+
+    @field_validator("transition_storage_class")
+    @classmethod
+    def _sc(cls, v: str) -> str:
+        u = v.upper()
+        if u not in _VALID_LAKE_STORAGE_CLASSES:
+            raise ValueError(f"Must be one of: {', '.join(sorted(_VALID_LAKE_STORAGE_CLASSES))}")
+        return u
+
+    @field_validator("expiration_days", "transition_days")
+    @classmethod
+    def _days(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("Must be >= 0 (0 = disabled).")
+        return v
+
+
+class SecurityLakeConfig(BaseModel):
+    enabled: bool = False
+    regions: list[str] = Field(default_factory=lambda: ["us-east-1"])
+    meta_store_manager_role_arn: str = ""
+    organization: SecurityLakeOrg = Field(default_factory=SecurityLakeOrg)
+    lifecycle: SecurityLakeLifecycle = Field(default_factory=SecurityLakeLifecycle)
+    sources: list[str] = Field(
+        default_factory=lambda: ["CLOUD_TRAIL_MGMT", "ROUTE53", "SH_FINDINGS", "VPC_FLOW"]
+    )
+
+
+# ---------------------------------------------------------------------------
 # Top-level
 # ---------------------------------------------------------------------------
 
@@ -198,6 +246,7 @@ class ServicesConfig(BaseModel):
     macie: MacieConfig = Field(default_factory=MacieConfig)
     inspector: InspectorConfig = Field(default_factory=InspectorConfig)
     access_analyzer: AccessAnalyzerConfig = Field(default_factory=AccessAnalyzerConfig)
+    security_lake: SecurityLakeConfig = Field(default_factory=SecurityLakeConfig)
 
 
 class SecurityServicesConfig(BaseModel):

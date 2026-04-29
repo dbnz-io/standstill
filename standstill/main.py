@@ -13,6 +13,7 @@ from standstill.commands import check as check_cmd
 from standstill.commands import config as config_cmd
 from standstill.commands import cost as cost_cmd
 from standstill.commands import disable as disable_cmd
+from standstill.commands import lake as lake_cmd
 from standstill.commands import lz as lz_cmd
 from standstill.commands import operations as ops_cmd
 from standstill.commands import ou as ou_cmd
@@ -39,6 +40,7 @@ app.add_typer(blueprint_cmd.app, name="blueprint")
 app.add_typer(ou_cmd.app, name="ou")
 app.add_typer(recorder_cmd.app, name="recorder")
 app.add_typer(security_cmd.app, name="security")
+app.add_typer(lake_cmd.app, name="lake")
 app.add_typer(lz_cmd.app, name="lz")
 app.command("check")(check_cmd.check)
 app.command("apply")(apply_cmd.apply)
