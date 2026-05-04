@@ -18,7 +18,10 @@ from standstill.commands import lz as lz_cmd
 from standstill.commands import operations as ops_cmd
 from standstill.commands import ou as ou_cmd
 from standstill.commands import recorder as recorder_cmd
+from standstill.commands import notifications as notify_cmd
+from standstill.commands import scp as scp_cmd
 from standstill.commands import security as security_cmd
+from standstill.commands import sso as sso_cmd
 from standstill.commands import view as view_cmd
 
 app = typer.Typer(
@@ -41,6 +44,9 @@ app.add_typer(ou_cmd.app, name="ou")
 app.add_typer(recorder_cmd.app, name="recorder")
 app.add_typer(security_cmd.app, name="security")
 app.add_typer(lake_cmd.app, name="lake")
+app.add_typer(scp_cmd.app, name="scp")
+app.add_typer(sso_cmd.app, name="sso")
+app.add_typer(notify_cmd.app, name="notify")
 app.add_typer(lz_cmd.app, name="lz")
 app.command("check")(check_cmd.check)
 app.command("apply")(apply_cmd.apply)
