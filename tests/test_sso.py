@@ -3,14 +3,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from botocore.exceptions import ClientError
 from typer.testing import CliRunner
 
 import standstill.aws.sso as sso_mod
 from standstill import state as _state
-from standstill.aws.sso import AccountAssignment, PermissionSet, SSOInstance
-
+from standstill.aws.sso import PermissionSet
 
 # ---------------------------------------------------------------------------
 # Helpers

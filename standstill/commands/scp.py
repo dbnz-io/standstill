@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -65,6 +65,7 @@ def scp_show(
 def scp_audit() -> None:
     """Show SCP coverage across the organization tree."""
     from concurrent.futures import ThreadPoolExecutor
+
     from standstill.aws.organizations import build_ou_tree
 
     with renderer.console.status("[bold]Building org tree and SCP map...[/bold]"):

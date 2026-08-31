@@ -176,6 +176,17 @@ class TestConfigureGuardDuty:
         mock_gd.update_detector.assert_called_once()
         mock_gd.update_organization_configuration.assert_called_once()
 
+    def test_org_config_uses_auto_enable_org_members_enum(self):
+        """The NEW/ALL/NONE enum must go to AutoEnableOrganizationMembers, not the
+        deprecated boolean AutoEnable param."""
+        mock_gd = MagicMock()
+        mock_gd.list_detectors.return_value = {"DetectorIds": ["det-1"]}
+        with patch.object(sec, "_admin_client", return_value=mock_gd):
+            sec.configure_guardduty(GuardDutyConfig(), "admin", "Role", "us-east-1")
+        _, kwargs = mock_gd.update_organization_configuration.call_args
+        assert "AutoEnable" not in kwargs
+        assert kwargs["AutoEnableOrganizationMembers"] in ("NEW", "ALL", "NONE")
+
     def test_runtime_error(self):
         with patch.object(sec, "_admin_client", side_effect=RuntimeError("no creds")):
             result = sec.configure_guardduty(GuardDutyConfig(), "admin", "Role", "us-east-1")

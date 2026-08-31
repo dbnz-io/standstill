@@ -7,7 +7,6 @@ from botocore.exceptions import ClientError
 
 from standstill import state as _state
 
-
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -187,6 +186,51 @@ def subscribe_email(topic_arn: str, email: str) -> str:
     return resp.get("SubscriptionArn", "")
 
 
+def set_eventbridge_publish_policy(topic_arn: str, rule_arn: str) -> dict:
+    """
+    Grant EventBridge permission to publish to an SNS topic.
+
+    Reads the topic's current access policy, merges in (or replaces) an
+    ``AllowEventBridgePublish`` statement scoped to ``rule_arn``, and writes it
+    back with ``set_topic_attributes``. Without this, an EventBridge rule
+    targeting the topic silently fails to deliver findings.
+
+    Returns the statement that was applied.
+    """
+    client = _state.state.get_client("sns")
+
+    # Read the current policy (SNS always returns a default policy if none set).
+    attrs = client.get_topic_attributes(TopicArn=topic_arn).get("Attributes", {})
+    raw_policy = attrs.get("Policy")
+    if raw_policy:
+        policy = json.loads(raw_policy)
+    else:
+        policy = {"Version": "2008-10-17", "Id": "__default_policy_ID", "Statement": []}
+
+    statements = policy.setdefault("Statement", [])
+
+    statement = {
+        "Sid": "AllowEventBridgePublish",
+        "Effect": "Allow",
+        "Principal": {"Service": "events.amazonaws.com"},
+        "Action": "sns:Publish",
+        "Resource": topic_arn,
+        "Condition": {"ArnEquals": {"aws:SourceArn": rule_arn}},
+    }
+
+    # Replace any prior statement with the same Sid so re-runs stay idempotent.
+    statements = [s for s in statements if s.get("Sid") != "AllowEventBridgePublish"]
+    statements.append(statement)
+    policy["Statement"] = statements
+
+    client.set_topic_attributes(
+        TopicArn=topic_arn,
+        AttributeName="Policy",
+        AttributeValue=json.dumps(policy),
+    )
+    return statement
+
+
 def create_finding_rule(
     name: str,
     sources: list[str],
@@ -254,7 +298,7 @@ def create_finding_rule(
         name=name,
         arn=rule_arn,
         state="ENABLED",
-        description=f"Security findings routing rule",
+        description="Security findings routing rule",
         event_pattern=pattern_str,
         target_arns=[topic_arn],
     )

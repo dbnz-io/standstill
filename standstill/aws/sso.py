@@ -8,7 +8,6 @@ from botocore.exceptions import ClientError
 
 from standstill import state as _state
 
-
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------

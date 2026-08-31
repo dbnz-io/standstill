@@ -354,7 +354,10 @@ class TestBlueprintInitCommand:
     def test_prints_created_path(self, tmp_path):
         dest = tmp_path / "bp.yaml"
         result = runner.invoke(app, ["blueprint", "init", "--output", str(dest)])
-        assert str(dest) in result.output
+        # Rich soft-wraps long paths across lines depending on terminal width, so
+        # strip whitespace before asserting the path is present.
+        flattened = "".join(result.output.split())
+        assert "".join(str(dest).split()) in flattened
 
 
 # ===========================================================================
