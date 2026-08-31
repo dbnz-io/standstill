@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from botocore.exceptions import ClientError
 
 from standstill import state as _state
-
 
 # ---------------------------------------------------------------------------
 # Dataclasses

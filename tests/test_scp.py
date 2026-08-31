@@ -1,7 +1,7 @@
 """Tests for standstill/aws/scp.py and standstill/commands/scp.py"""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -9,8 +9,6 @@ from typer.testing import CliRunner
 
 import standstill.aws.scp as scp_mod
 from standstill import state as _state
-from standstill.aws.scp import SCPPolicy, SCPTarget
-
 
 # ---------------------------------------------------------------------------
 # Helpers

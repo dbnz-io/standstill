@@ -217,9 +217,12 @@ def configure_guardduty(
             for cfg_key, api_name in GUARDDUTY_FEATURE_MAP.items()
         ]
 
+        # AutoEnableOrganizationMembers takes the NEW/ALL/NONE enum; the legacy
+        # top-level AutoEnable param is a deprecated boolean and must not receive
+        # the enum string. Per-feature AutoEnable (below) also takes the enum.
         gd.update_organization_configuration(
             DetectorId=detector_id,
-            AutoEnable=auto,
+            AutoEnableOrganizationMembers=auto,
             Features=features,
         )
 
