@@ -17,7 +17,26 @@ The AWS console does not scale. Raw SDK scripts do not compose. Terraform module
 
 standstill is built around that operational model. It treats the desired security state as something that can be declared, planned, diffed, and applied — the same way infrastructure engineers think about Terraform — but specifically for the security controls and services that AWS organizations are built on.
 
-Security operations also have a financial dimension. The services that protect your organization — CloudTrail, Config, GuardDuty, Security Hub, CloudWatch — generate real AWS spend that grows with account count and usage. Understanding where that money goes, catching unexpected spikes before the invoice arrives, and ensuring commitments like Savings Plans are actually being used are as much part of running a security team as enrolling controls. standstill treats cost visibility as a first-class operational concern, not a separate tool.
+---
+
+## Why standstill instead of the Control Tower console?
+
+The console is fine for a handful of clicks. It does not scale to enrolling hundreds of controls across dozens of OUs, or configuring five security services org-wide across every account and region. standstill is a power-user operations layer on top of Control Tower — it does not replace the console, it makes the repetitive, at-scale work sane and repeatable (the same way Terraform relates to the AWS console).
+
+| Task | standstill CLI | Control Tower console | Winner |
+|------|----------------|-----------------------|--------|
+| Enroll controls across many OUs / behaviors | `apply --enable-detective --ou … --dry-run` | Click each control, each OU, one at a time | **CLI, decisively** |
+| Plan / diff before changing | `--dry-run` shows the plan | No preview at all | **CLI** |
+| Declarative, version-controlled, reviewable state | YAML in git, `apply --file` | Clicks, no artifact | **CLI** |
+| Configure 5 security services org-wide | one `security apply` (two-phase, cross-account) | Bounce between GuardDuty / Security Hub / Macie / Inspector / Access Analyzer consoles, per region | **CLI** |
+| Config recorders across N accounts | `recorder setup --all` fan-out | Per-account, per-region clicks | **CLI** |
+| Auditing / scripting / CI integration | `--output json` → pipe | Not possible | **CLI** |
+| First-time setup / guided landing zone | Manual flags | Guided wizard, validation, visual | **Console** |
+| Provisioning new accounts | Account Factory automation | Account Factory works | **Console** |
+| Visual security posture, findings drill-down, compliance scores | Static tables | Rich dashboards, resource-level links | **Console** |
+| Discoverability for a new user | Must know IDs / ARNs | Point-and-click | **Console** |
+
+**The rule of thumb:** for bulk, repeatable, auditable control and security-service management at org scale, the CLI wins. For guided first-run setup and *visual* posture and findings investigation, stay in the console.
 
 ---
 
@@ -206,124 +225,6 @@ standstill view controls          # enabled controls per OU with status breakdow
 standstill accounts check-roles   # verify CT execution role reachability across all accounts
 ```
 
-### Cost reporting and forecasting
-
-Security infrastructure generates measurable AWS spend. `cost report` breaks that spend down by any dimension — service, usage type, account, region, or cost allocation tag — and supports the full filter and grouping vocabulary of Cost Explorer. All cost commands accept `--output table` (default), `--output json`, and `--output csv`.
-
-```bash
-# All services this month
-standstill cost report
-
-# Last quarter, compare to the prior equivalent period
-standstill cost report -s 2024-01-01 -e 2024-04-01 --compare
-
-# Break down CloudTrail spend by usage type with correlated API calls
-standstill cost report --group-by usage-type --service cloudtrail
-
-# Multi-account spend, names resolved from Organizations
-standstill cost report --group-by account --top 10
-
-# Group by cost allocation tag, filter by another
-standstill cost report --group-by tag:Team --filter tag:Environment=production
-
-# Daily EC2 spend for a specific week
-standstill cost report --group-by usage-type --filter service=ec2 \
-  --granularity daily -s 2024-03-01 -e 2024-03-08
-
-# Export
-standstill -o csv cost report -s 2024-01-01 -e 2024-04-01 > costs.csv
-```
-
-`cost services` lists every service with charges ordered by cost, including its short filter alias and total spend — the natural starting point before drilling into `cost report`:
-
-```bash
-standstill cost services
-standstill cost services -s 2024-01-01 -e 2024-04-01
-```
-
-`cost forecast` projects future spend using the CE ML model, with an optional per-service breakdown driven by parallel fan-out calls:
-
-```bash
-standstill cost forecast --months 6
-standstill cost forecast --by-service --top 5
-```
-
-**`--group-by` options:** `service` · `usage-type` · `account` · `region` · `tag:KEY`
-
-**`--filter KEY=VALUE` keys:** `service` · `region` · `account` · `usage-type` · `az` · `instance-type` · `operation` · `platform` · `purchase-type` · `tag:KEY`
-
-Service filters accept short aliases (`ec2`, `s3`, `rds`, `eks`, `lambda`, …) and resolve them to the exact CE service names for the period. `region=all` is a no-op that includes all regions.
-
-### Cost anomalies and budgets
-
-Two commands provide continuous spend awareness without manual investigation:
-
-```bash
-# Anomalies detected by CE's ML model, sorted by total impact
-standstill cost anomalies
-standstill cost anomalies --days 7 --min-impact 50
-
-# All AWS Budgets with current spend, forecast, and status
-standstill cost budgets
-```
-
-`cost anomalies` shows the service, region, account, impact vs expected spend, and CE's root cause attribution for each spike. `cost budgets` flags every budget at `OK`, `WARNING` (≥80%), or `EXCEEDED` status so over-runs are visible before the invoice closes.
-
-### Usage attribution — connecting charges to callers
-
-When a usage type charge appears in Cost Explorer, `cost scan` answers the next question: which IAM identities, in which accounts, are making the API calls that generate it.
-
-```bash
-# Configure a log source once (event history needs no configuration)
-standstill cost trail set \
-  --s3-bucket my-org-cloudtrail-bucket \
-  --s3-prefix AWSLogs/o-xxxxxxxxxxxx/CloudTrail
-standstill cost trail set --log-group /aws/cloudtrail/management-events
-
-# Scan against the CloudTrail event history API (last 90 days)
-standstill cost scan usage-type CW:Requests
-
-# Region-prefixed types are stripped automatically
-standstill cost scan usage-type USE1-CW:Requests
-
-# Widen the window; query the S3 trail or CloudWatch Logs instead
-standstill cost scan usage-type S3-Requests-Tier1 \
-  --target s3 --start 2024-03-01 --end 2024-04-01
-
-standstill cost scan usage-type CloudTrail-DataEvent-S3 --target cloudwatch
-
-# Export all events
-standstill -o csv cost scan usage-type Lambda-Requests > callers.csv
-```
-
-The scan result leads with an **Identity Attribution** table — grouped by account, identity type, and name with call count, error count, and active regions — followed by an API call summary and the 20 most recent events. The three `--target` options are:
-
-| Target | Source | Notes |
-|--------|--------|-------|
-| `event-history` | CloudTrail management events API | Default; last 90 days; no setup |
-| `s3` | `.json.gz` files in a configured S3 bucket | All event types; any retention |
-| `cloudwatch` | CloudWatch Logs Insights query | All event types; any retention |
-
-### Commitment optimization
-
-Three subcommands surface whether existing cost commitments are working efficiently:
-
-```bash
-# Savings Plans: utilization and coverage, with over/under-commitment warnings
-standstill cost optimize savings-plans
-standstill cost optimize savings-plans -s 2024-01-01 -e 2024-02-01
-
-# Reserved Instances: utilization and coverage per service
-standstill cost optimize reserved
-
-# EC2 rightsizing: instances to downsize or terminate, with monthly savings estimate
-standstill cost optimize rightsizing
-
-standstill -o json cost optimize rightsizing
-```
-
-**savings-plans** flags utilization below 80% (over-committed — you are paying for capacity you do not use) and coverage below 70% (under-committed — on-demand spend that could be committed). **reserved** shows the same metrics per RI-eligible service. **rightsizing** uses 14 days of CloudWatch utilization data to identify EC2 instances ready to be downsized or terminated, sorted by estimated monthly savings.
-
 ---
 
 ## Prerequisites
@@ -347,26 +248,6 @@ sts:GetCallerIdentity
 ```
 
 Additional permissions are required for security services commands (`guardduty:*`, `securityhub:*`, `macie2:*`, `inspector2:*`, `accessanalyzer:*`) scoped to the delegated admin account.
-
-Cost commands require:
-
-```
-ce:GetCostAndUsage
-ce:GetDimensionValues
-ce:GetCostForecast
-ce:GetAnomalies
-ce:GetSavingsPlansUtilization
-ce:GetSavingsPlansCoverage
-ce:GetReservationUtilization
-ce:GetReservationCoverage
-ce:GetRightsizingRecommendation
-budgets:DescribeBudgets
-cloudtrail:LookupEvents          # cost scan --target event-history
-s3:GetObject, s3:ListBucket      # cost scan --target s3
-logs:StartQuery, logs:GetQueryResults  # cost scan --target cloudwatch
-```
-
-`organizations:ListAccounts` is only needed when using `cost report --group-by account` to resolve account IDs to names.
 
 Run `standstill check` after installation to verify connectivity and permissions before doing anything else.
 
@@ -505,57 +386,6 @@ standstill [--profile PROFILE] [--region REGION] [--output table|json|csv] COMMA
   lz settings                    Show landing zone service settings
   lz settings-set                Update landing zone service settings
 
-  cost report                    Cost breakdown by service, usage type, account, region, or tag
-    -s / --start DATE            Start date YYYY-MM-DD (default: first of month)
-    -e / --end DATE              End date YYYY-MM-DD exclusive (default: today)
-    -g / --group-by DIM          service | usage-type | account | region | tag:KEY
-    -S / --service NAME          Shortcut for --filter service=NAME (accepts short names)
-    -f / --filter KEY=VALUE      Dimension filter, repeatable, ANDed together
-                                   service · region · account · usage-type · az
-                                   instance-type · operation · platform · purchase-type · tag:KEY
-                                   region=all is a no-op (include all regions)
-    --granularity                monthly (default) | daily
-    -n / --top N                 Keep only top N groups per period
-    --min-cost FLOAT             Exclude groups below this USD threshold (default: 0.01)
-    -m / --metric                unblended (default) | blended | amortized
-    --compare                    Side-by-side delta table vs the prior equivalent period
-
-  cost services [-s DATE] [-e DATE] [-m METRIC]
-                                 All services with costs ordered by spend, with alias and cost columns
-
-  cost forecast                  Projected monthly spend
-    --months N                   Months ahead to forecast (default: 3)
-    --metric METRIC              unblended | blended | amortized
-    --by-service                 Per-service forecast matrix via parallel CE calls
-    -n / --top N                 Number of services when --by-service (default: 10)
-
-  cost budgets                   All AWS Budgets with status (OK / WARNING / EXCEEDED)
-
-  cost anomalies                 Cost spikes detected by CE Anomaly Detection
-    -d / --days N                Look-back window in days, max 90 (default: 30)
-    --min-impact FLOAT           Minimum total USD impact to include
-
-  cost trail set                 Configure the CloudTrail log source used by cost scan
-    --s3-bucket BUCKET           S3 bucket containing CloudTrail logs
-    --s3-prefix PREFIX           Key prefix up to (not including) the date component
-    --log-group GROUP            CloudWatch Logs log group name
-  cost trail show                Show configured log source(s)
-  cost trail clear --s3 / --cloudwatch
-                                 Remove a configured log source
-
-  cost scan usage-type TYPE      Attribute a CE usage type charge to the callers generating it
-    -s / --start DATE            Start date (default: 7 days ago)
-    -e / --end DATE              End date (default: today)
-    -l / --limit N               Max events to retrieve (default: 200)
-    -t / --target TARGET         event-history (default) | s3 | cloudwatch
-                                 Output: Identity Attribution · API Call Summary · Recent Events
-
-  cost optimize savings-plans [-s DATE] [-e DATE]
-                                 SP utilization and coverage with over/under-commitment warnings
-  cost optimize reserved [-s DATE] [-e DATE]
-                                 RI utilization and coverage by service
-  cost optimize rightsizing      EC2 rightsizing recommendations sorted by estimated savings
-
   config set-profile PROFILE                 Set the default AWS profile
   config unset-profile                       Remove the default AWS profile
   config set-delegated-admin ACCOUNT_ID      Set the default delegated security admin account
@@ -576,15 +406,6 @@ standstill apply --file examples/preventive_controls.yaml --dry-run
 standstill apply --file examples/preventive_controls.yaml
 standstill security init && standstill security apply --file security_services.yaml
 standstill view controls && standstill security status
-```
-
-Once controls and services are in place, establish a cost baseline:
-
-```bash
-standstill cost services
-standstill cost report --compare
-standstill cost anomalies
-standstill cost optimize savings-plans && standstill cost optimize rightsizing
 ```
 
 ---

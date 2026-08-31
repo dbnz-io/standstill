@@ -3,6 +3,13 @@ from __future__ import annotations
 from typing import Annotated, Optional
 
 import typer
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    NoCredentialsError,
+    ProfileNotFound,
+)
+from rich.console import Console
 
 from standstill import state as _state
 from standstill.commands import accounts as accounts_cmd
@@ -11,14 +18,13 @@ from standstill.commands import blueprint as blueprint_cmd
 from standstill.commands import catalog as catalog_cmd
 from standstill.commands import check as check_cmd
 from standstill.commands import config as config_cmd
-from standstill.commands import cost as cost_cmd
 from standstill.commands import disable as disable_cmd
 from standstill.commands import lake as lake_cmd
 from standstill.commands import lz as lz_cmd
+from standstill.commands import notifications as notify_cmd
 from standstill.commands import operations as ops_cmd
 from standstill.commands import ou as ou_cmd
 from standstill.commands import recorder as recorder_cmd
-from standstill.commands import notifications as notify_cmd
 from standstill.commands import scp as scp_cmd
 from standstill.commands import security as security_cmd
 from standstill.commands import sso as sso_cmd
@@ -31,11 +37,14 @@ app = typer.Typer(
     rich_markup_mode="rich",
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
+    # Expected AWS/runtime errors are handled by main() below with a clean
+    # one-line message. Disabling Typer's Rich exception handler prevents the
+    # full traceback + locals dump from leaking on e.g. a mistyped profile.
+    pretty_exceptions_enable=False,
 )
 
 app.add_typer(view_cmd.app, name="view")
 app.add_typer(catalog_cmd.app, name="catalog")
-app.add_typer(cost_cmd.app, name="cost")
 app.add_typer(ops_cmd.app, name="operations")
 app.add_typer(config_cmd.app, name="config")
 app.add_typer(accounts_cmd.app, name="accounts")
@@ -74,5 +83,34 @@ def _global_options(
     _state.state.reset()
 
 
+def _clean_message(exc: BaseException) -> str:
+    """Extract a human-readable message from an AWS/runtime exception."""
+    if isinstance(exc, ClientError):
+        err = exc.response.get("Error", {})
+        code = err.get("Code", "")
+        msg = err.get("Message", str(exc))
+        return f"{msg} ({code})" if code else msg
+    return str(exc)
+
+
+def main() -> None:
+    """Console-script entry point.
+
+    Wraps the Typer app so that expected AWS and runtime failures surface as a
+    single clean ``Error:`` line on stderr with a non-zero exit — the same
+    treatment ``check`` already gives them — instead of a raw traceback.
+    Unexpected exceptions still propagate so genuine bugs remain visible.
+    """
+    err = Console(stderr=True)
+    try:
+        app()
+    except KeyboardInterrupt:
+        err.print("\n[dim]Aborted.[/dim]")
+        raise SystemExit(130)
+    except (RuntimeError, ClientError, BotoCoreError, ProfileNotFound, NoCredentialsError) as exc:
+        err.print(f"[bold red]Error:[/bold red] {_clean_message(exc)}")
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
-    app()
+    main()

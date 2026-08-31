@@ -45,7 +45,7 @@ dev = [
 ]
 
 [project.scripts]
-standstill = "standstill.main:app"
+standstill = "standstill.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["standstill"]
