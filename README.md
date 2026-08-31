@@ -1,6 +1,6 @@
 # standstill
 
-[![Tests](https://github.com/dbnz-io/standstill/actions/workflows/tests.yml/badge.svg)](https://github.com/dbnz-io/standstill/actions/workflows/tests.yml)
+[![CI / Release](https://github.com/dbnz-io/standstill/actions/workflows/release.yml/badge.svg)](https://github.com/dbnz-io/standstill/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MPL 2.0](https://img.shields.io/badge/license-MPL%202.0-brightgreen)](LICENSE)
 [![Coverage](docs/coverage.svg)](docs/coverage.svg)
