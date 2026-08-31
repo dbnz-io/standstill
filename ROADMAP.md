@@ -31,7 +31,7 @@ Make failures honest.
 | 4 | **Global error boundary** — every command surfaces clean one-line errors like `check` does; no raw traceback / locals dump | A mistyped profile dumped a full stack trace on `view` but a clean line on `check`. `main.py` | ✅ |
 | 5 | **Kill silent `except ClientError: pass`** in status/read paths — distinguish "disabled" from "access denied" | ~13 sites in `security_services.py` + `sso.py` + `scp.py:175` + `notifications.py` make permission gaps look identical to "feature off" | ⬜ |
 | 6 | **Correct exit codes & timeout semantics** — non-zero on partial failure; distinguish "still running" from "failed" | `sso assign` exits 0 on poll timeout; blueprints report "failed" while a stack is still creating | ⬜ |
-| 7 | **Operations journal: refresh status in place** or label as last-known | `operations list` always shows stale `IN_PROGRESS`. `operations.py:49` | ⬜ |
+| 7 | **Operations journal: refresh status in place** or label as last-known | `operations list` always shows stale `IN_PROGRESS`. `operations.py:49` | ✅ (labeled last-known) |
 | 10 | **Resolve the single-region limitation** — implement multi-region or hard-guard + document | `security`/`recorder` configure only the home region despite org-wide framing → users believe they're covered when they aren't | ⬜ |
 
 ## P2 — Test integrity
@@ -42,7 +42,7 @@ Today's green coverage hid a fully-broken domain.
 |---|------|-----|--------|
 | 8a | **Replace mock-the-wrapper tests with moto / botocore Stubber** on AWS-facing paths (esp. accounts) | The Accounts domain was 100% "tested" yet cannot run — the mock-everything strategy validated phantom APIs | ⬜ |
 | 8b | **Add `mypy`/`pyright` + `boto3-stubs` as a CI gate** | Type-checking would have caught the phantom-API bug class statically. Biggest single ROI against recurrence | ⬜ |
-| 8c | **Cover untested write lifecycles** — `sso` assign/unassign poll, `notify setup` wizard, GuardDuty AutoEnable | These mutate prod org state and had zero behavioral coverage | 🚧 |
+| 8c | **Cover untested write lifecycles** — `sso` assign/unassign poll, `notify setup` wizard, GuardDuty AutoEnable | These mutate prod org state and had zero behavioral coverage | ✅ (sso cmds, notify wizard, guardduty param covered; more legacy modules remain) |
 
 ## P3 — CI/CD & supply chain
 
@@ -50,7 +50,7 @@ Port the dredge pipeline.
 
 | # | Item | Why | Status |
 |---|------|-----|--------|
-| 9 | **Unify CI to the dredge model**: `test`/`security`/`package` → `release`; add `bandit`; SHA-pin actions; packaging smoke test; CycloneDX SBOM; version-detected release. Keep the coverage badge | standstill has no static security scan (ironic), unpinned actions, no artifact validation before publish | ⬜ |
+| 9 | **Unify CI to the dredge model**: `test`/`security`/`package` → `release`; add `bandit`; SHA-pin actions; packaging smoke test; CycloneDX SBOM; version-detected release. Keep the coverage badge | standstill has no static security scan (ironic), unpinned actions, no artifact validation before publish | ✅ |
 | 13 | **Dependency hygiene** — lockfile/constraints + Dependabot/renovate | Reproducible builds; supply-chain posture for a security product | ⬜ |
 
 ## P4 — Operational robustness
