@@ -29,7 +29,7 @@ Make failures honest.
 | # | Item | Why | Status |
 |---|------|-----|--------|
 | 4 | **Global error boundary** — every command surfaces clean one-line errors like `check` does; no raw traceback / locals dump | A mistyped profile dumped a full stack trace on `view` but a clean line on `check`. `main.py` | ✅ |
-| 5 | **Kill silent `except ClientError: pass`** in status/read paths — distinguish "disabled" from "access denied" | ~13 sites in `security_services.py` + `sso.py` + `scp.py:175` + `notifications.py` make permission gaps look identical to "feature off" | ⬜ |
+| 5 | **Kill silent `except ClientError: pass`** in status/read paths — distinguish "disabled" from "access denied" | ~13 sites in `security_services.py` + `sso.py` + `scp.py:175` + `notifications.py` make permission gaps look identical to "feature off" | 🚧 (all 6 security-service status probes now surface access-denied; sso list + scp audit swallows remain) |
 | 6 | **Correct exit codes & timeout semantics** — non-zero on partial failure; distinguish "still running" from "failed" | `sso assign` exits 0 on poll timeout; blueprints report "failed" while a stack is still creating | ⬜ |
 | 7 | **Operations journal: refresh status in place** or label as last-known | `operations list` always shows stale `IN_PROGRESS`. `operations.py:49` | ✅ (labeled last-known) |
 | 10 | **Resolve the single-region limitation** — implement multi-region or hard-guard + document | `security`/`recorder` configure only the home region despite org-wide framing → users believe they're covered when they aren't | ⬜ |
