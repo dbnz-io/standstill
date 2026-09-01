@@ -217,9 +217,12 @@ def configure_guardduty(
             for cfg_key, api_name in GUARDDUTY_FEATURE_MAP.items()
         ]
 
+        # AutoEnableOrganizationMembers takes the NEW/ALL/NONE enum; the legacy
+        # top-level AutoEnable param is a deprecated boolean and must not receive
+        # the enum string. Per-feature AutoEnable (below) also takes the enum.
         gd.update_organization_configuration(
             DetectorId=detector_id,
-            AutoEnable=auto,
+            AutoEnableOrganizationMembers=auto,
             Features=features,
         )
 
@@ -521,21 +524,47 @@ def configure_security_lake(
 # Status helpers — one per service
 # ---------------------------------------------------------------------------
 
+# When a status probe fails with one of these codes the account/service state is
+# genuinely unknown (a permissions problem), NOT "the service is disabled".
+# Surfacing it as an error keeps a posture view from silently under-reporting.
+_ACCESS_DENIED_CODES = {
+    "AccessDenied",
+    "AccessDeniedException",
+    "UnauthorizedException",
+    "UnauthorizedOperation",
+    "AuthorizationError",
+}
+
+
+def _is_access_denied(exc: ClientError) -> bool:
+    return exc.response.get("Error", {}).get("Code", "") in _ACCESS_DENIED_CODES
+
+
+def _access_denied_message(exc: ClientError) -> str:
+    msg = exc.response.get("Error", {}).get("Message", "permission error")
+    return f"access denied: {msg}"
+
+
 def _fill_guardduty_status(
     status: ServiceStatus, admin_account: str, role_name: str, region: str
 ) -> None:
     gd = _admin_client("guardduty", admin_account, role_name, region)
-    detectors = gd.list_detectors().get("DetectorIds", [])
-    if not detectors:
+    try:
+        detectors = gd.list_detectors().get("DetectorIds", [])
+        if not detectors:
+            return
+        det = gd.get_detector(DetectorId=detectors[0])
+        status.enabled = det.get("Status") == "ENABLED"
+        status.auto_enable = det.get("FindingPublishingFrequency", "—")
+    except ClientError as exc:
+        if _is_access_denied(exc):
+            status.error = _access_denied_message(exc)
         return
-    det = gd.get_detector(DetectorId=detectors[0])
-    status.enabled = det.get("Status") == "ENABLED"
-    status.auto_enable = det.get("FindingPublishingFrequency", "—")
     try:
         org_cfg = gd.describe_organization_configuration(DetectorId=detectors[0])
         status.auto_enable = org_cfg.get("AutoEnable", "—")
     except ClientError:
-        pass
+        pass  # secondary enrichment; primary status already determined
 
 
 def _fill_security_hub_status(
@@ -551,7 +580,9 @@ def _fill_security_hub_status(
         status.details["standards_count"] = str(len(subs))
     except ClientError as exc:
         if exc.response["Error"]["Code"] == "InvalidAccessException":
-            status.enabled = False
+            status.enabled = False  # Security Hub genuinely not enabled here
+        elif _is_access_denied(exc):
+            status.error = _access_denied_message(exc)
 
 
 def _fill_macie_status(
@@ -566,8 +597,9 @@ def _fill_macie_status(
         status.auto_enable = str(org_cfg.get("autoEnable", "—"))
         disc = mc.get_automated_discovery_configuration()
         status.details["automated_discovery"] = disc.get("status", "—")
-    except ClientError:
-        pass
+    except ClientError as exc:
+        if _is_access_denied(exc):
+            status.error = _access_denied_message(exc)
 
 
 def _fill_inspector_status(
@@ -580,8 +612,9 @@ def _fill_inspector_status(
         status.enabled = True
         status.auto_enable = "ON" if any(auto.values()) else "OFF"
         status.details = {k: str(v) for k, v in auto.items()}
-    except ClientError:
-        pass
+    except ClientError as exc:
+        if _is_access_denied(exc):
+            status.error = _access_denied_message(exc)
 
 
 def _fill_access_analyzer_status(
@@ -594,8 +627,9 @@ def _fill_access_analyzer_status(
         status.enabled = bool(org_analyzers)
         status.auto_enable = "N/A"
         status.details["analyzers"] = ", ".join(a["name"] for a in org_analyzers) or "none"
-    except ClientError:
-        pass
+    except ClientError as exc:
+        if _is_access_denied(exc):
+            status.error = _access_denied_message(exc)
 
 
 def _fill_security_lake_status(
@@ -613,9 +647,10 @@ def _fill_security_lake_status(
                 auto = org_cfg.get("autoEnableNewAccount", [])
                 status.auto_enable = "ON" if auto else "OFF"
             except ClientError:
-                pass
-    except ClientError:
-        pass
+                pass  # secondary enrichment
+    except ClientError as exc:
+        if _is_access_denied(exc):
+            status.error = _access_denied_message(exc)
 
 
 # ---------------------------------------------------------------------------
@@ -1180,10 +1215,12 @@ def assess_member_accounts(
     service_errors: dict[str, str] = {}
 
     with ThreadPoolExecutor(max_workers=5) as pool:
-        futures = {
-            pool.submit(svc.fetch_members_fn, admin, role_name, region): svc.key
-            for svc in member_svcs
-        }
+        futures = {}
+        for svc in member_svcs:
+            fn = svc.fetch_members_fn
+            if fn is None:  # member_svcs only holds services with a fetch fn
+                continue
+            futures[pool.submit(fn, admin, role_name, region)] = svc.key
         for future in as_completed(futures):
             svc_key = futures[future]
             try:

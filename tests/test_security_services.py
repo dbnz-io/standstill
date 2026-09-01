@@ -176,6 +176,17 @@ class TestConfigureGuardDuty:
         mock_gd.update_detector.assert_called_once()
         mock_gd.update_organization_configuration.assert_called_once()
 
+    def test_org_config_uses_auto_enable_org_members_enum(self):
+        """The NEW/ALL/NONE enum must go to AutoEnableOrganizationMembers, not the
+        deprecated boolean AutoEnable param."""
+        mock_gd = MagicMock()
+        mock_gd.list_detectors.return_value = {"DetectorIds": ["det-1"]}
+        with patch.object(sec, "_admin_client", return_value=mock_gd):
+            sec.configure_guardduty(GuardDutyConfig(), "admin", "Role", "us-east-1")
+        _, kwargs = mock_gd.update_organization_configuration.call_args
+        assert "AutoEnable" not in kwargs
+        assert kwargs["AutoEnableOrganizationMembers"] in ("NEW", "ALL", "NONE")
+
     def test_runtime_error(self):
         with patch.object(sec, "_admin_client", side_effect=RuntimeError("no creds")):
             result = sec.configure_guardduty(GuardDutyConfig(), "admin", "Role", "us-east-1")
@@ -337,6 +348,61 @@ class TestConfigureAccessAnalyzer:
         with patch.object(sec, "_admin_client", side_effect=RuntimeError("fail")):
             result = sec.configure_access_analyzer(AccessAnalyzerConfig(), "admin", "Role", "us-east-1")
         assert not result.success
+
+
+# ---------------------------------------------------------------------------
+# Status probes — access-denied must surface as an error, not "disabled"
+# ---------------------------------------------------------------------------
+
+class TestStatusAccessDenied:
+    def _status(self, service):
+        return sec.ServiceStatus(
+            service=service, delegated_admin="111111111111", enabled=False,
+            auto_enable="—", details={},
+        )
+
+    def test_macie_access_denied_sets_error_not_disabled(self):
+        mc = MagicMock()
+        mc.get_macie_session.side_effect = _client_error("AccessDeniedException", "no perms")
+        st = self._status("macie")
+        with patch.object(sec, "_admin_client", return_value=mc):
+            sec._fill_macie_status(st, "111111111111", "Role", "us-east-1")
+        assert st.error and "access denied" in st.error
+        assert st.enabled is False
+
+    def test_inspector_access_denied_sets_error(self):
+        ins = MagicMock()
+        ins.describe_organization_configuration.side_effect = _client_error("AccessDeniedException")
+        st = self._status("inspector")
+        with patch.object(sec, "_admin_client", return_value=ins):
+            sec._fill_inspector_status(st, "111111111111", "Role", "us-east-1")
+        assert "access denied" in st.error
+
+    def test_guardduty_access_denied_sets_error(self):
+        gd = MagicMock()
+        gd.list_detectors.side_effect = _client_error("AccessDeniedException")
+        st = self._status("guardduty")
+        with patch.object(sec, "_admin_client", return_value=gd):
+            sec._fill_guardduty_status(st, "111111111111", "Role", "us-east-1")
+        assert "access denied" in st.error
+
+    def test_security_hub_not_enabled_is_not_an_error(self):
+        sh = MagicMock()
+        sh.describe_hub.side_effect = _client_error("InvalidAccessException")
+        st = self._status("security_hub")
+        with patch.object(sec, "_admin_client", return_value=sh):
+            sec._fill_security_hub_status(st, "111111111111", "Role", "us-east-1")
+        # Genuinely not enabled — must remain disabled with no spurious error.
+        assert st.enabled is False
+        assert st.error == ""
+
+    def test_access_analyzer_access_denied_sets_error(self):
+        aa = MagicMock()
+        aa.list_analyzers.side_effect = _client_error("AccessDeniedException")
+        st = self._status("access_analyzer")
+        with patch.object(sec, "_admin_client", return_value=aa):
+            sec._fill_access_analyzer_status(st, "111111111111", "Role", "us-east-1")
+        assert "access denied" in st.error
 
 
 # ---------------------------------------------------------------------------

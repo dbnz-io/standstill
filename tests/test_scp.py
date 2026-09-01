@@ -1,7 +1,7 @@
 """Tests for standstill/aws/scp.py and standstill/commands/scp.py"""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -9,8 +9,6 @@ from typer.testing import CliRunner
 
 import standstill.aws.scp as scp_mod
 from standstill import state as _state
-from standstill.aws.scp import SCPPolicy, SCPTarget
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -267,15 +265,31 @@ class TestBuildTargetScpMap:
             result = scp_mod.build_target_scp_map()
         assert result == {}
 
-    def test_handles_client_error_on_targets(self):
+    def test_skips_policy_on_benign_error(self):
         mock_client = MagicMock()
         mock_client.list_policies.return_value = {
             "Policies": [_make_policy_raw("p-001")]
         }
-        mock_client.list_targets_for_policy.side_effect = _client_error("AccessDeniedException")
+        # A non-permission error (e.g. a policy in a transient state) is skipped.
+        mock_client.list_targets_for_policy.side_effect = _client_error("ServiceException")
         with patch.object(_state.state, "get_client", return_value=mock_client):
             result = scp_mod.build_target_scp_map()
         assert result == {}
+
+    def test_raises_on_access_denied(self):
+        import pytest
+        from botocore.exceptions import ClientError
+
+        mock_client = MagicMock()
+        mock_client.list_policies.return_value = {
+            "Policies": [_make_policy_raw("p-001")]
+        }
+        # Access-denied must NOT be swallowed — a partial audit that looks
+        # complete is worse than a loud failure.
+        mock_client.list_targets_for_policy.side_effect = _client_error("AccessDeniedException")
+        with patch.object(_state.state, "get_client", return_value=mock_client):
+            with pytest.raises(ClientError):
+                scp_mod.build_target_scp_map()
 
 
 # ---------------------------------------------------------------------------

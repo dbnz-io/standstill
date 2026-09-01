@@ -135,7 +135,7 @@ def _interactive_picker(
         behavior_counts: dict[str, int] = {}
         for c in catalog.values():
             behavior_counts[c.behavior] = behavior_counts.get(c.behavior, 0) + 1
-        options = [
+        options: list[tuple[str, str]] = [
             (b, f"{_BEHAVIOR_LABELS.get(b, b)}  [cyan]{behavior_counts[b]} controls[/cyan]")
             for b in ("PREVENTIVE", "DETECTIVE", "PROACTIVE")
             if b in behavior_counts

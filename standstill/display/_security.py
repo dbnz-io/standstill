@@ -259,7 +259,7 @@ def _print_assessment_summary(results: list[AccountAssessment], active_services:
 # ---------------------------------------------------------------------------
 
 def render_lake_view_results(results: list, database: str) -> None:
-    from standstill.aws.lake import SOURCE_LABELS, SOURCE_VIEW_NAMES
+    from standstill.aws.lake import SOURCE_LABELS
 
     t = Table(box=box.ROUNDED, show_lines=False)
     t.add_column("Source", style="bold")
@@ -345,6 +345,6 @@ def render_lake_status(wg, tables: list, views: list[str], database: str, region
         )
     elif not views:
         console.print(
-            f"\n[dim]No views created yet. Run:\n"
-            f"  standstill lake create-views[/dim]"
+            "\n[dim]No views created yet. Run:\n"
+            "  standstill lake create-views[/dim]"
         )

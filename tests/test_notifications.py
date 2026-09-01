@@ -4,14 +4,11 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 from botocore.exceptions import ClientError
 from typer.testing import CliRunner
 
 import standstill.aws.notifications as notify_mod
 from standstill import state as _state
-from standstill.aws.notifications import EventRule, SNSTopic
-
 
 # ---------------------------------------------------------------------------
 # Helpers
