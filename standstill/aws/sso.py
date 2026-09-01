@@ -192,6 +192,19 @@ def resolve_principal_id(
     return None
 
 
+_ACCESS_DENIED_CODES = {
+    "AccessDenied",
+    "AccessDeniedException",
+    "UnauthorizedException",
+    "AuthorizationError",
+}
+_THROTTLE_CODES = {"ThrottlingException", "Throttling", "RequestThrottled", "TooManyRequestsException"}
+
+
+def _error_code(exc: ClientError) -> str:
+    return exc.response.get("Error", {}).get("Code", "")
+
+
 def list_all_assignments(
     instance_arn: str,
     identity_store_id: str,
@@ -201,6 +214,10 @@ def list_all_assignments(
     """
     List all account assignments across all permission sets.
     Resolves principal names concurrently.
+
+    Raises ClientError on an access-denied error rather than returning a silent
+    partial listing — a truncated result that looks complete is worse than a
+    loud failure for an audit view.
     """
     client = _state.state.get_client("sso-admin")
     raw_assignments: list[tuple[str, str, str, str, str]] = []  # (account_id, ps_arn, ps_name, principal_id, principal_type)
@@ -217,7 +234,9 @@ def list_all_assignments(
                 if not token:
                     break
                 kwargs["NextToken"] = token
-            except ClientError:
+            except ClientError as exc:
+                if _error_code(exc) in _ACCESS_DENIED_CODES:
+                    raise
                 break
 
         for account_id in account_ids:
@@ -241,7 +260,9 @@ def list_all_assignments(
                     if not token:
                         break
                     assign_kwargs["NextToken"] = token
-                except ClientError:
+                except ClientError as exc:
+                    if _error_code(exc) in _ACCESS_DENIED_CODES:
+                        raise
                     break
 
     # Resolve principal names concurrently
@@ -358,8 +379,10 @@ def poll_assignment_status(
             status = status_obj.get("Status", "IN_PROGRESS")
             if status in ("SUCCEEDED", "FAILED"):
                 return status
-        except ClientError:
-            return "FAILED"
+        except ClientError as exc:
+            # A transient throttle mid-poll is not a real failure — keep waiting.
+            if _error_code(exc) not in _THROTTLE_CODES:
+                return "FAILED"
 
         time.sleep(interval)
         elapsed += interval

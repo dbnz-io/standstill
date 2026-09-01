@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 import click
 import typer
@@ -123,7 +123,9 @@ def init(
 
     # ── GuardDuty ────────────────────────────────────────────────────────────
     if configure_gd:
-        ex = existing.services.guardduty if existing else None
+        # One name is reused across service blocks for the matching existing
+        # config; each block's type differs, so annotate as Any.
+        ex: Any = existing.services.guardduty if existing else None
         console.print("\n[bold cyan]GuardDuty[/bold cyan]")
         console.print("[dim]Threat detection across all org accounts.[/dim]")
         gd_enabled = typer.confirm("Enable GuardDuty?", default=ex.enabled if ex else True)
@@ -504,6 +506,15 @@ def apply(
         str,
         typer.Option("--role-name", "-n", help="CT execution role to assume in the delegated admin account."),
     ] = _DEFAULT_ROLE,
+    regions: Annotated[
+        Optional[str],
+        typer.Option(
+            "--regions",
+            help="Comma-separated regions to configure (default: the current/--region). "
+            "Regional services (GuardDuty, Security Hub, Macie, Inspector) are "
+            "per-region and must be configured in each region you operate in.",
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Show the plan without making changes."),
@@ -523,10 +534,16 @@ def apply(
       Phase 2 — Configure each service's org settings from the delegated admin
                 (called by assuming the CT execution role there)
 
+    GuardDuty, Security Hub, Macie, and Inspector are regional services: their
+    delegation and configuration apply only to the region(s) they run in. Pass
+    --regions to configure several in one run; otherwise only the current region
+    is configured.
+
     \b
     Examples:
       standstill security apply --file security_services.yaml --dry-run
       standstill security apply --file security_services.yaml --yes
+      standstill security apply -f security_services.yaml --regions us-east-1,eu-west-1 -y
     """
     try:
         config = load_config(file)
@@ -534,13 +551,19 @@ def apply(
         err.print(f"[bold red]Error:[/bold red] {exc}")
         raise typer.Exit(1)
 
-    region = _state.state.region or "us-east-1"
+    default_region = _state.state.region or "us-east-1"
+    region_list = (
+        [r.strip() for r in regions.split(",") if r.strip()] if regions else [default_region]
+    )
 
     # ── Plan ─────────────────────────────────────────────────────────────────
     with renderer.console.status("[bold]Checking current delegation status...[/bold]"):
-        delegation = sec_api.check_delegated_admins(config.delegated_admin_account, region)
+        delegation = sec_api.check_delegated_admins(config.delegated_admin_account, region_list[0])
 
     renderer.render_security_plan(config, delegation)
+    renderer.console.print(
+        f"\n[dim]Target region(s): [cyan]{', '.join(region_list)}[/cyan][/dim]"
+    )
 
     if dry_run:
         renderer.console.print("\n[bold yellow]Dry run — no changes applied.[/bold yellow]")
@@ -549,25 +572,33 @@ def apply(
     if not yes:
         typer.confirm("\nProceed with apply?", abort=True)
 
-    # ── Phase 1 ──────────────────────────────────────────────────────────────
-    renderer.console.print("\n[bold]Phase 1 — Delegated Admin Registration[/bold]")
-    with renderer.console.status("[bold]Registering delegated administrators...[/bold]"):
-        phase1, phase2 = sec_api.apply_services(config, role_name, region)
+    any_failure = False
+    for region in region_list:
+        if len(region_list) > 1:
+            renderer.console.print(f"\n[bold underline]Region: {region}[/bold underline]")
 
-    renderer.render_security_results(phase1, "Phase 1")
+        # ── Phase 1 ──────────────────────────────────────────────────────────
+        renderer.console.print("\n[bold]Phase 1 — Delegated Admin Registration[/bold]")
+        with renderer.console.status("[bold]Registering delegated administrators...[/bold]"):
+            phase1, phase2 = sec_api.apply_services(config, role_name, region)
 
-    failed_p1 = [r for r in phase1 if not r.success]
-    if failed_p1:
-        err.print(
-            f"\n[bold red]{len(failed_p1)} delegation(s) failed — "
-            "Phase 2 skipped for affected services.[/bold red]"
-        )
+        renderer.render_security_results(phase1, "Phase 1")
 
-    # ── Phase 2 ──────────────────────────────────────────────────────────────
-    renderer.console.print("\n[bold]Phase 2 — Service Configuration[/bold]")
-    renderer.render_security_results(phase2, "Phase 2")
+        failed_p1 = [r for r in phase1 if not r.success]
+        if failed_p1:
+            err.print(
+                f"\n[bold red]{len(failed_p1)} delegation(s) failed in {region} — "
+                "Phase 2 skipped for affected services.[/bold red]"
+            )
 
-    if any(not r.success for r in phase1 + phase2):
+        # ── Phase 2 ──────────────────────────────────────────────────────────
+        renderer.console.print("\n[bold]Phase 2 — Service Configuration[/bold]")
+        renderer.render_security_results(phase2, "Phase 2")
+
+        if any(not r.success for r in phase1 + phase2):
+            any_failure = True
+
+    if any_failure:
         raise typer.Exit(1)
 
 

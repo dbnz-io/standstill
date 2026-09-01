@@ -1215,10 +1215,12 @@ def assess_member_accounts(
     service_errors: dict[str, str] = {}
 
     with ThreadPoolExecutor(max_workers=5) as pool:
-        futures = {
-            pool.submit(svc.fetch_members_fn, admin, role_name, region): svc.key
-            for svc in member_svcs
-        }
+        futures = {}
+        for svc in member_svcs:
+            fn = svc.fetch_members_fn
+            if fn is None:  # member_svcs only holds services with a fetch fn
+                continue
+            futures[pool.submit(fn, admin, role_name, region)] = svc.key
         for future in as_completed(futures):
             svc_key = futures[future]
             try:

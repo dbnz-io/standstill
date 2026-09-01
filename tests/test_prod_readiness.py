@@ -39,6 +39,59 @@ class TestErrorBoundary:
     def test_keyboard_interrupt_exits_130(self):
         assert self._run_main_raising(KeyboardInterrupt()) == 130
 
+    def test_records_audit_on_exit(self):
+        import standstill.main as m
+        with patch.object(m, "app", side_effect=SystemExit(2)), patch.object(
+            m, "_record_audit"
+        ) as rec:
+            with pytest.raises(SystemExit):
+                m.main()
+        rec.assert_called_once_with(2)
+
+    def test_records_audit_on_error(self):
+        import standstill.main as m
+        with patch.object(m, "app", side_effect=RuntimeError("boom")), patch.object(
+            m, "_record_audit"
+        ) as rec:
+            with pytest.raises(SystemExit):
+                m.main()
+        rec.assert_called_once_with(1)
+
+
+# ---------------------------------------------------------------------------
+# audit log
+# ---------------------------------------------------------------------------
+
+class TestAuditLog:
+    def test_writes_jsonl_record(self, tmp_path, monkeypatch):
+        from standstill import audit
+
+        log = tmp_path / "audit.log"
+        monkeypatch.setenv("STANDSTILL_AUDIT_LOG", str(log))
+        audit.record_invocation(["scp", "detach", "-n", "X"], 0, profile="prod", region="us-east-1")
+        audit.record_invocation(["sso", "assign"], 1, profile="prod", region="us-east-1")
+
+        lines = log.read_text().strip().splitlines()
+        assert len(lines) == 2
+        first = json.loads(lines[0])
+        assert first["args"] == ["scp", "detach", "-n", "X"]
+        assert first["exit_code"] == 0
+        assert first["profile"] == "prod"
+        assert "ts" in first
+
+    def test_best_effort_never_raises(self, monkeypatch):
+        from standstill import audit
+
+        # Point at an unwritable path — must swallow the error, not raise.
+        monkeypatch.setenv("STANDSTILL_AUDIT_LOG", "/nonexistent-root-dir/x/y/audit.log")
+        audit.record_invocation(["view", "ous"], 0)  # should not raise
+
+    def test_path_override(self, tmp_path, monkeypatch):
+        from standstill import audit
+
+        monkeypatch.setenv("STANDSTILL_AUDIT_LOG", str(tmp_path / "custom.log"))
+        assert audit.audit_path() == tmp_path / "custom.log"
+
     def test_clean_message_formats_client_error(self):
         from standstill.main import _clean_message
         err = ClientError({"Error": {"Code": "AccessDenied", "Message": "nope"}}, "Op")
@@ -221,6 +274,19 @@ class TestSsoCommands:
         api.create_assignment.assert_called_once()
         assert "created successfully" in result.output
 
+    def test_assign_timeout_exits_2(self):
+        with self._patch_api() as api:
+            api.get_instance.return_value = _sso_instance()
+            api.find_permission_set_by_name.return_value = _permission_set()
+            api.resolve_principal_id.return_value = "user-1"
+            api.create_assignment.return_value = {"RequestId": "req-1"}
+            api.poll_assignment_status.return_value = "IN_PROGRESS"
+            result = runner.invoke(
+                app, ["sso", "assign", "-a", "111122223333", "-p", "Admin", "-u", "alice"]
+            )
+        # Not confirmed within the window must not read as success.
+        assert result.exit_code == 2
+
     def test_assign_failed_poll_exits_1(self):
         with self._patch_api() as api:
             api.get_instance.return_value = _sso_instance()
@@ -308,6 +374,26 @@ class TestSsoCommands:
             api.list_all_assignments.return_value = [_assignment()]
             result = runner.invoke(app, ["sso", "audit"])
         assert result.exit_code == 0, result.output
+
+    def test_list_all_assignments_raises_on_access_denied(self):
+        from botocore.exceptions import ClientError
+
+        from standstill.aws import sso as sso_api
+        from standstill.aws.sso import PermissionSet
+
+        client = MagicMock()
+        client.list_accounts_for_provisioned_permission_set.side_effect = ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": "no"}}, "List"
+        )
+        ps = PermissionSet(
+            arn="arn:ps", name="Admin", description="", session_duration="PT1H",
+            created_date=None,
+        )
+        with patch(
+            "standstill.aws.sso._state.state.get_client", return_value=client
+        ):
+            with pytest.raises(ClientError):
+                sso_api.list_all_assignments("arn:sso", "d-1", [ps], {})
 
     def test_list_assignments_filters_by_account(self):
         with self._patch_api() as api, patch(

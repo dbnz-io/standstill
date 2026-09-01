@@ -28,7 +28,7 @@ _TERMINAL_ALL = _TERMINAL_SUCCESS | _TERMINAL_FAILURE
 @dataclass
 class StackResult:
     stack_name: str
-    action: str       # "created" | "updated" | "skipped" | "dry-run" | "failed"
+    action: str       # "created" | "updated" | "skipped" | "dry-run" | "failed" | "timeout"
     status: str = ""
     error: str = ""
 
@@ -73,6 +73,10 @@ def load_template_body(stack: BlueprintStack, blueprint_path: Path) -> str:
     """Return the CloudFormation template body string for a stack."""
     if stack.template is not None:
         return stack.template
+    if stack.template_file is None:
+        raise ValueError(
+            f"Stack '{stack.stack_name}' has neither 'template' nor 'template_file'."
+        )
     return (blueprint_path.parent / stack.template_file).read_text(encoding="utf-8")
 
 
@@ -327,7 +331,16 @@ def apply_blueprint_to_account(
                     action=deploy_result["action"],
                     status=polled.get("StackStatus", ""),
                 ))
-        except (RuntimeError, TimeoutError, ClientError) as e:
+        except TimeoutError as e:
+            # The deploy was submitted and may still be in progress — this is
+            # "not confirmed", not a failure. Keep it distinct so it isn't
+            # reported as a hard failure.
+            results.append(StackResult(
+                stack_name=stack.stack_name,
+                action="timeout",
+                error=str(e),
+            ))
+        except (RuntimeError, ClientError) as e:
             results.append(StackResult(
                 stack_name=stack.stack_name,
                 action="failed",
