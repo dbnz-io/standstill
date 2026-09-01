@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "standstill"
-version = "0.1.0"
+version = "0.2.0"
 description = "AWS Control Tower management CLI"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -44,6 +44,7 @@ dev = [
     "pytest-cov>=5,<7",
     "ruff>=0.4,<1",
     "bandit[toml]>=1.7,<2",
+    "mypy>=1.8,<2",
 ]
 
 [project.scripts]
@@ -60,6 +61,14 @@ line-length = 130
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+# boto3/botocore and other third-party stubs are not installed; the dynamic
+# client factory means AWS calls are effectively untyped. mypy here is a guard
+# against real logic/type errors in our own code, not full type coverage.
+ignore_missing_imports = true
+plugins = ["pydantic.mypy"]
 
 [tool.bandit]
 # Documented skips (tighten over time — see ROADMAP P1/P2):

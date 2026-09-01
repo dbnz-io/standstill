@@ -196,6 +196,14 @@ standstill security pull --account 123456789012
 standstill security apply --file security_services.yaml --dry-run
 ```
 
+**Regions.** GuardDuty, Security Hub, Macie, and Inspector are *regional* services — delegation and configuration apply only to the region they run in. `security apply` targets the current region (`--region`/`AWS_DEFAULT_REGION`) by default; pass `--regions` to configure several in one run. Access Analyzer's organization analyzer and delegated-admin registration are region-scoped too, so run every region you operate in:
+
+```bash
+standstill security apply -f security_services.yaml --regions us-east-1,eu-west-1,ap-southeast-2 -y
+```
+
+`security status` and `security assess` report a single region at a time; re-run them with `--region` to inspect each.
+
 ### Config recorder management
 
 Detective controls depend on AWS Config recorders being active in every account. AWS Config is also the most common source of unexpected cost in a Control Tower deployment — the default `allSupported` mode records every resource type AWS supports, including high-volume types like CloudFormation stacks, ENIs, and SSM compliance items, that generate millions of configuration items per month without adding meaningful security coverage.
@@ -223,6 +231,14 @@ standstill view ous               # OU hierarchy as a tree
 standstill view accounts          # all accounts with OU and status
 standstill view controls          # enabled controls per OU with status breakdown
 standstill accounts check-roles   # verify CT execution role reachability across all accounts
+```
+
+### Audit log
+
+Every invocation is appended as one JSON line to `~/.standstill/audit.log` (override with `STANDSTILL_AUDIT_LOG`), recording the timestamp, the command and its arguments, the active profile and region, and the exit code. The log is written centrally at the CLI entry point, so it captures every mutation without per-command wiring — and writing is best-effort, so an audit failure never breaks a command.
+
+```jsonc
+{"ts": "2026-08-31T18:22:04.512Z", "args": ["scp", "detach", "-n", "DenyDeleteLogging", "-t", "ou-ab12-34cd5678"], "exit_code": 0, "profile": "org-management", "region": "us-east-1", "pid": 40122}
 ```
 
 ---

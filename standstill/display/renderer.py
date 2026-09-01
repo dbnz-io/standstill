@@ -446,6 +446,7 @@ def render_blueprint_stack_results(results: list) -> None:
         "skipped": "dim",
         "dry-run": "yellow",
         "failed": "bold red",
+        "timeout": "bold yellow",
     }
     for r in results:
         style = _ACTION_STYLE.get(r.action, "white")

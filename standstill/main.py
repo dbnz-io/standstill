@@ -93,23 +93,51 @@ def _clean_message(exc: BaseException) -> str:
     return str(exc)
 
 
+def _record_audit(exit_code: int) -> None:
+    """Best-effort audit record for this invocation (never raises)."""
+    try:
+        import sys
+
+        from standstill import audit
+        audit.record_invocation(
+            sys.argv[1:],
+            exit_code,
+            profile=_state.state.effective_profile,
+            region=_state.state.region,
+        )
+    except Exception:
+        pass
+
+
 def main() -> None:
     """Console-script entry point.
 
     Wraps the Typer app so that expected AWS and runtime failures surface as a
     single clean ``Error:`` line on stderr with a non-zero exit — the same
     treatment ``check`` already gives them — instead of a raw traceback.
-    Unexpected exceptions still propagate so genuine bugs remain visible.
+    Unexpected exceptions still propagate so genuine bugs remain visible. Every
+    invocation is recorded to the audit log (see standstill.audit) with its exit
+    code, centrally so the trail cannot silently omit a mutation.
     """
     err = Console(stderr=True)
     try:
         app()
+    except SystemExit as exc:
+        # Normal Typer/Click exit path (success or typer.Exit(n)).
+        code = exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+        _record_audit(code)
+        raise
     except KeyboardInterrupt:
         err.print("\n[dim]Aborted.[/dim]")
+        _record_audit(130)
         raise SystemExit(130)
     except (RuntimeError, ClientError, BotoCoreError, ProfileNotFound, NoCredentialsError) as exc:
         err.print(f"[bold red]Error:[/bold red] {_clean_message(exc)}")
+        _record_audit(1)
         raise SystemExit(1)
+    else:
+        # app() returned without raising SystemExit (rare, but be safe).
+        _record_audit(0)
 
 
 if __name__ == "__main__":

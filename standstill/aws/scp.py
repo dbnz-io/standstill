@@ -160,17 +160,31 @@ def find_scp(name_or_id: str) -> SCPPolicy | None:
     return None
 
 
+_ACCESS_DENIED_CODES = {
+    "AccessDenied",
+    "AccessDeniedException",
+    "UnauthorizedException",
+    "AuthorizationError",
+}
+
+
 def build_target_scp_map() -> dict[str, list[SCPPolicy]]:
     """
     Build a reverse map of {target_id: [SCPPolicy, ...]} by iterating
     all SCPs and their targets.
+
+    Raises ClientError on an access-denied error rather than silently dropping
+    the policy from the audit — an incomplete audit that looks complete is worse
+    than a loud failure.
     """
     policies = list_scps()
     result: dict[str, list[SCPPolicy]] = {}
     for policy in policies:
         try:
             targets = list_targets(policy.id)
-        except ClientError:
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code", "") in _ACCESS_DENIED_CODES:
+                raise
             continue
         for target in targets:
             result.setdefault(target.target_id, []).append(policy)

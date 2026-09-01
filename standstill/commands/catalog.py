@@ -6,6 +6,7 @@ from typing import Annotated
 
 import typer
 import yaml
+from botocore.exceptions import ClientError
 from rich import box
 from rich.console import Console
 from rich.table import Table
@@ -51,9 +52,8 @@ def catalog_build(
 
     Also updates ~/.standstill/catalog.yaml (used by 'ct apply --enable-all').
 
-    \b
-    Note: ListControls is not yet in boto3's service model, so this command
-    calls the CT endpoint directly via a signed HTTP request.
+    The catalog is fetched via the boto3 ``controlcatalog`` client
+    (``list_controls`` paginator).
     """
     region = _state.state.region or "us-east-1"
 
@@ -61,7 +61,7 @@ def catalog_build(
     with console.status("[bold]Fetching controls catalog...[/bold]"):
         try:
             raw_controls = ct_api.fetch_controls_from_api(region)
-        except RuntimeError as e:
+        except (RuntimeError, ClientError) as e:
             err.print(f"[bold red]Error fetching controls:[/bold red] {e}")
             raise typer.Exit(1)
 
