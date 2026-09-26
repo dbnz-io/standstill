@@ -700,8 +700,9 @@ def _print_account_detail(info: dict) -> None:
     renderer.console.print(Panel(t, title="[bold]Account[/bold]", expand=False))
 
 
-def _poll_with_progress(op_id: str, timeout: int, poll_interval: int = 15) -> dict:
-    """Poll an account factory operation, printing elapsed time at each interval."""
+def _poll_with_progress(record_id: str, timeout: int, poll_interval: int = 15) -> dict:
+    """Poll an Account Factory (Service Catalog) record, printing elapsed time at
+    each interval. Returns the normalized record details."""
     from botocore.exceptions import ClientError as _ClientError
 
     from standstill import state as _state
@@ -714,18 +715,19 @@ def _poll_with_progress(op_id: str, timeout: int, poll_interval: int = 15) -> di
 
     while time.monotonic() < deadline:
         try:
-            ct = _state.state.get_client("controltower")
-            resp = ct.get_landing_zone_operation(operationIdentifier=op_id)
-            op = resp.get("operationDetails", {})
+            sc = _state.state.get_client("servicecatalog")
+            resp = sc.describe_record(Id=record_id)
+            detail = resp.get("RecordDetail", {})
             throttle_count = 0
             elapsed = int(time.monotonic() - start)
             mins, secs = divmod(elapsed, 60)
-            op_type = op.get("operationType", "ACCOUNT_OPERATION")
+            op_type = detail.get("RecordType", "PROVISION_PRODUCT")
+            status = detail.get("Status", "...")
             renderer.console.print(
-                f"  [dim][{mins:02d}:{secs:02d}][/dim]  {op_type} — [cyan]{op.get('status', '...')}[/cyan]"
+                f"  [dim][{mins:02d}:{secs:02d}][/dim]  {op_type} — [cyan]{status}[/cyan]"
             )
-            if op.get("status") in {"SUCCEEDED", "FAILED"}:
-                return op
+            if status in {"SUCCEEDED", "FAILED"}:
+                return af_api.normalize_record(detail)
         except _ClientError as e:
             code = e.response["Error"]["Code"]
             if code in {"ThrottlingException", "Throttling", "RequestThrottled"}:
@@ -736,6 +738,6 @@ def _poll_with_progress(op_id: str, timeout: int, poll_interval: int = 15) -> di
         time.sleep(poll_interval)
 
     raise TimeoutError(
-        f"Operation {op_id} did not complete within {timeout}s. "
+        f"Operation {record_id} did not complete within {timeout}s. "
         "Account factory operations can take 10–30 minutes."
     )

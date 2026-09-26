@@ -354,6 +354,34 @@ class TestSecurityApplyCommand:
             )
         assert result.exit_code == 0
 
+    def test_apply_multi_region_loops_per_region(self, tmp_path):
+        cfg_file = tmp_path / "sec.yaml"
+        cfg_file.write_text(
+            "version: '1'\ndelegated_admin_account: '123456789012'\nservices:\n  guardduty:\n    enabled: true\n"
+        )
+        delegations = [
+            DelegationStatus("guardduty", "guardduty.amazonaws.com",
+                             None, "123456789012", "register")
+        ]
+        p1 = [ServiceApplyResult("guardduty", "delegation", True, "ok")]
+        p2 = [ServiceApplyResult("guardduty", "configuration", True, "ok")]
+        with (
+            patch("standstill.commands.security.sec_api.check_delegated_admins",
+                  return_value=delegations),
+            patch("standstill.commands.security.sec_api.apply_services",
+                  return_value=(p1, p2)) as mock_apply,
+        ):
+            result = runner.invoke(
+                app,
+                ["security", "apply", "--file", str(cfg_file),
+                 "--regions", "us-east-1,eu-west-1", "--yes"],
+            )
+        assert result.exit_code == 0
+        # apply_services must run once per region, with the region threaded through.
+        assert mock_apply.call_count == 2
+        called_regions = {c.args[2] for c in mock_apply.call_args_list}
+        assert called_regions == {"us-east-1", "eu-west-1"}
+
     def test_apply_phase1_failure_exits_nonzero(self, tmp_path):
         cfg_file = tmp_path / "sec.yaml"
         cfg_file.write_text(

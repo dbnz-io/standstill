@@ -340,7 +340,7 @@ def apply_blueprint(
 
     if account:
         target_ids = [account]
-    else:
+    elif ou:
         try:
             with renderer.console.status("[bold]Fetching accounts in OU...[/bold]"):
                 ou_detail = af_api.describe_ou(ou)
@@ -353,6 +353,9 @@ def apply_blueprint(
         if not target_ids:
             renderer.console.print(f"[dim]No active accounts found in OU {ou}.[/dim]")
             return
+    else:
+        err.print("[bold red]Error:[/bold red] provide --account <id> or --ou <ou-id>.")
+        raise typer.Exit(1)
 
     action_word = "Would deploy" if dry_run else "Will deploy"
     renderer.console.print(
@@ -365,7 +368,8 @@ def apply_blueprint(
             f"Apply blueprint '{bp.name}' to {len(target_ids)} account(s)?", abort=True
         )
 
-    all_success = True
+    any_failed = False
+    any_timeout = False
     for acct_id in target_ids:
         renderer.console.print(f"\n[bold]Account:[/bold] [cyan]{acct_id}[/cyan]")
         results = bp_api.apply_blueprint_to_account(
@@ -379,7 +383,18 @@ def apply_blueprint(
         )
         renderer.render_blueprint_stack_results(results)
         if any(r.action == "failed" for r in results):
-            all_success = False
+            any_failed = True
+        if any(r.action == "timeout" for r in results):
+            any_timeout = True
 
-    if not all_success:
+    # Hard failures exit 1; deploys still in progress (timeout) exit 2 — "not
+    # confirmed", distinct from a failure — so scripts can tell them apart.
+    if any_failed:
         raise typer.Exit(1)
+    if any_timeout:
+        err.print(
+            "[bold yellow]Not confirmed:[/bold yellow] one or more stacks were "
+            "still deploying when polling timed out. Check CloudFormation in the "
+            "target account(s)."
+        )
+        raise typer.Exit(2)

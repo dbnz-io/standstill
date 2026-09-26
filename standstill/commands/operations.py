@@ -32,7 +32,10 @@ def operations_list() -> None:
     t.add_column("Control", no_wrap=True)
     t.add_column("OU ARN", style="dim")
     t.add_column("Started", style="dim")
-    t.add_column("Status", justify="center")
+    # The journal records the status at submit time and does not refresh it in
+    # place, so this column is the last-known value, not live. `operations check`
+    # queries the CT API for the current status.
+    t.add_column("Status (last known)", justify="center")
 
     for op in ops:
         status = op.get("status", "UNKNOWN")

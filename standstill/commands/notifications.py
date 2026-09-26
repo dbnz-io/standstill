@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Optional
+import json
 
 import typer
 from rich.console import Console
@@ -147,7 +147,7 @@ def notify_setup() -> None:
         email = typer.prompt("  Email address")
         with console.status("[bold]Subscribing email...[/bold]"):
             try:
-                sub_arn = notify_api.subscribe_email(topic_arn=topic_arn, email=email)
+                notify_api.subscribe_email(topic_arn=topic_arn, email=email)
                 console.print(
                     f"[green]✓[/green] Subscription created. "
                     f"[dim]A confirmation email will be sent to {email}.[/dim]"
@@ -178,39 +178,46 @@ def notify_setup() -> None:
     console.print(f"  ARN: [dim]{rule.arn}[/dim]")
     console.print()
 
-    # Step 6: SNS topic policy reminder
-    console.print("[bold yellow]Important: SNS Topic Policy Required[/bold yellow]")
-    console.print(
-        "[dim]EventBridge needs permission to publish to your SNS topic.\n"
-        "Add the following statement to your SNS topic policy:[/dim]\n"
-    )
+    # Step 6: Grant EventBridge permission to publish to the SNS topic.
+    # Without this the rule matches findings but silently fails to deliver.
+    console.print("[bold cyan]Step 6: Granting EventBridge → SNS Publish Permission[/bold cyan]")
+    policy_applied = False
+    with console.status("[bold]Updating SNS topic policy...[/bold]"):
+        try:
+            notify_api.set_eventbridge_publish_policy(topic_arn=topic_arn, rule_arn=rule.arn)
+            policy_applied = True
+        except Exception as e:
+            err.print(
+                f"[bold red]Error:[/bold red] Could not update the SNS topic policy: {e}\n"
+                "[dim]The rule was created but findings will NOT be delivered until "
+                "EventBridge is granted sns:Publish on the topic.[/dim]"
+            )
 
-    import json
-    policy_statement = {
-        "Sid": "AllowEventBridgePublish",
-        "Effect": "Allow",
-        "Principal": {
-            "Service": "events.amazonaws.com"
-        },
-        "Action": "sns:Publish",
-        "Resource": topic_arn,
-        "Condition": {
-            "ArnEquals": {
-                "aws:SourceArn": rule.arn
-            }
+    if policy_applied:
+        console.print(
+            f"[green]✓[/green] EventBridge granted [cyan]sns:Publish[/cyan] on "
+            f"[cyan]{topic_arn.split(':')[-1]}[/cyan] (scoped to this rule)."
+        )
+        console.print()
+        console.print(
+            "\n[bold green]✓ Setup complete![/bold green]\n"
+            f"[dim]Rule [cyan]{rule.name}[/cyan] will route findings from "
+            f"{', '.join(s.replace('aws.', '') for s in selected_sources)} "
+            f"to [cyan]{topic_arn.split(':')[-1]}[/cyan][/dim]"
+        )
+    else:
+        # Fall back to the manual instructions so the user can finish by hand.
+        console.print()
+        console.print(
+            "[dim]Apply the following statement to the SNS topic policy manually:[/dim]"
+        )
+        policy_statement = {
+            "Sid": "AllowEventBridgePublish",
+            "Effect": "Allow",
+            "Principal": {"Service": "events.amazonaws.com"},
+            "Action": "sns:Publish",
+            "Resource": topic_arn,
+            "Condition": {"ArnEquals": {"aws:SourceArn": rule.arn}},
         }
-    }
-    console.print_json(json.dumps(policy_statement, indent=2))
-    console.print()
-    console.print(
-        "[dim]Add this to the SNS topic policy via:\n"
-        f"  aws sns set-topic-attributes --topic-arn {topic_arn} "
-        "--attribute-name Policy --attribute-value '<POLICY_JSON>'[/dim]"
-    )
-
-    console.print(
-        "\n[bold green]✓ Setup complete![/bold green]\n"
-        f"[dim]Rule [cyan]{rule.name}[/cyan] will route findings from "
-        f"{', '.join(s.replace('aws.', '') for s in selected_sources)} "
-        f"to [cyan]{topic_arn.split(':')[-1]}[/cyan][/dim]"
-    )
+        console.print_json(json.dumps(policy_statement, indent=2))
+        raise typer.Exit(1)

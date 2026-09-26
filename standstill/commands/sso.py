@@ -203,7 +203,13 @@ def sso_assign(
             err.print("[bold red]Error:[/bold red] Assignment creation failed.")
             raise typer.Exit(1)
         else:
-            renderer.console.print("[bold yellow]Assignment is still in progress.[/bold yellow]")
+            # Not confirmed within the poll window — exit non-zero (distinct from
+            # a hard failure) so scripts don't treat "unknown" as success.
+            err.print(
+                "[bold yellow]Not confirmed:[/bold yellow] assignment is still in "
+                "progress. Re-check with [bold]standstill sso list-assignments[/bold]."
+            )
+            raise typer.Exit(2)
     else:
         renderer.console.print("[bold green]✓ Assignment created.[/bold green]")
 
@@ -297,7 +303,13 @@ def sso_unassign(
             err.print("[bold red]Error:[/bold red] Assignment deletion failed.")
             raise typer.Exit(1)
         else:
-            renderer.console.print("[bold yellow]Deletion is still in progress.[/bold yellow]")
+            # Not confirmed within the poll window — exit non-zero (distinct from
+            # a hard failure) so scripts don't treat "unknown" as success.
+            err.print(
+                "[bold yellow]Not confirmed:[/bold yellow] deletion is still in "
+                "progress. Re-check with [bold]standstill sso list-assignments[/bold]."
+            )
+            raise typer.Exit(2)
     else:
         renderer.console.print("[bold green]✓ Assignment removed.[/bold green]")
 

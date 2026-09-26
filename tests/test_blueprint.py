@@ -354,7 +354,10 @@ class TestBlueprintInitCommand:
     def test_prints_created_path(self, tmp_path):
         dest = tmp_path / "bp.yaml"
         result = runner.invoke(app, ["blueprint", "init", "--output", str(dest)])
-        assert str(dest) in result.output
+        # Rich soft-wraps long paths across lines depending on terminal width, so
+        # strip whitespace before asserting the path is present.
+        flattened = "".join(result.output.split())
+        assert "".join(str(dest).split()) in flattened
 
 
 # ===========================================================================
@@ -526,6 +529,20 @@ class TestBlueprintApplyCommand:
                  "--account", "123456789012", "--yes"],
             )
         assert result.exit_code == 1
+
+    def test_timeout_exits_2_not_1(self, tmp_path):
+        f = _write_blueprint(tmp_path)
+        with patch(
+            "standstill.commands.blueprint.bp_api.apply_blueprint_to_account",
+            return_value=[StackResult("baseline-networking", "timeout", error="still creating")],
+        ):
+            result = runner.invoke(
+                app,
+                ["blueprint", "apply", "--file", str(f),
+                 "--account", "123456789012", "--yes"],
+            )
+        # Still-deploying is "not confirmed" (exit 2), not a hard failure (exit 1).
+        assert result.exit_code == 2
 
     def test_apply_ou_fetches_accounts(self, tmp_path):
         f = _write_blueprint(tmp_path)

@@ -670,6 +670,179 @@ class TestAccountFactoryUnit:
 
 
 # ===========================================================================
+# Account Factory provisioning (Service Catalog) — unit tests
+#
+# These exercise the real AWS-facing code path (not a mocked wrapper) so that
+# a call to a non-existent boto3 method would fail the test. The previous
+# implementation called phantom controltower.create_managed_account APIs that
+# passed the mock-the-wrapper command tests but raised AttributeError at runtime.
+# ===========================================================================
+
+def _dispatch(mocks: dict):
+    """Return a get_client side_effect that dispatches by service name."""
+    def _get(service, **kwargs):
+        return mocks[service]
+    return _get
+
+
+def _account_factory_sc_mock() -> MagicMock:
+    sc = MagicMock()
+    sc.search_products.return_value = {
+        "ProductViewSummaries": [
+            {"Name": "AWS Control Tower Account Factory", "ProductId": "prod-1"}
+        ]
+    }
+    sc.describe_product.return_value = {
+        "ProvisioningArtifacts": [{"Id": "pa-1", "Active": True, "Guidance": "DEFAULT"}]
+    }
+    sc.list_launch_paths.return_value = {"LaunchPathSummaries": [{"Id": "lp-1"}]}
+    sc.provision_product.return_value = {"RecordDetail": {"RecordId": "rec-1"}}
+    return sc
+
+
+class TestAccountFactoryProvisioning:
+    def test_create_managed_account_provisions_via_service_catalog(self):
+        from standstill.aws.account_factory import create_managed_account
+
+        sc = _account_factory_sc_mock()
+        org = MagicMock()
+        org.describe_organizational_unit.return_value = {
+            "OrganizationalUnit": {"Name": "Sandbox"}
+        }
+        with patch(
+            "standstill.aws.account_factory._state.state.get_client",
+            side_effect=_dispatch({"servicecatalog": sc, "organizations": org}),
+        ):
+            record_id = create_managed_account(
+                name="ClientA", email="a@client.com", ou_id="ou-ab12-34cd5678"
+            )
+
+        assert record_id == "rec-1"
+        sc.provision_product.assert_called_once()
+        _, kwargs = sc.provision_product.call_args
+        assert kwargs["ProductId"] == "prod-1"
+        assert kwargs["ProvisioningArtifactId"] == "pa-1"
+        assert kwargs["PathId"] == "lp-1"
+        params = {p["Key"]: p["Value"] for p in kwargs["ProvisioningParameters"]}
+        assert params["AccountName"] == "ClientA"
+        assert params["AccountEmail"] == "a@client.com"
+        assert params["ManagedOrganizationalUnit"] == "Sandbox (ou-ab12-34cd5678)"
+        assert params["SSOUserEmail"] == "a@client.com"
+
+    def test_missing_account_factory_product_raises(self):
+        import pytest
+
+        from standstill.aws.account_factory import create_managed_account
+
+        sc = MagicMock()
+        sc.search_products.return_value = {"ProductViewSummaries": []}
+        org = MagicMock()
+        with patch(
+            "standstill.aws.account_factory._state.state.get_client",
+            side_effect=_dispatch({"servicecatalog": sc, "organizations": org}),
+        ):
+            with pytest.raises(RuntimeError, match="Account Factory"):
+                create_managed_account(name="X", email="x@y.com", ou_id="ou-1")
+
+    def test_register_resolves_email_then_provisions(self):
+        from standstill.aws.account_factory import register_managed_account
+
+        sc = _account_factory_sc_mock()
+        org = MagicMock()
+        org.describe_account.return_value = {
+            "Account": {"Name": "Existing", "Email": "existing@corp.com"}
+        }
+        org.describe_organizational_unit.return_value = {
+            "OrganizationalUnit": {"Name": "Workloads"}
+        }
+        with patch(
+            "standstill.aws.account_factory._state.state.get_client",
+            side_effect=_dispatch({"servicecatalog": sc, "organizations": org}),
+        ):
+            record_id = register_managed_account(
+                account_id="123456789012", ou_id="ou-cd34-56ef7890"
+            )
+
+        assert record_id == "rec-1"
+        _, kwargs = sc.provision_product.call_args
+        params = {p["Key"]: p["Value"] for p in kwargs["ProvisioningParameters"]}
+        assert params["AccountEmail"] == "existing@corp.com"
+        assert params["AccountName"] == "Existing"
+
+    def test_deregister_finds_provisioned_product_and_terminates(self):
+        from standstill.aws.account_factory import deregister_managed_account
+
+        sc = MagicMock()
+        sc.search_provisioned_products.return_value = {
+            "ProvisionedProducts": [{"Id": "pp-1"}, {"Id": "pp-2"}]
+        }
+
+        def _outputs(ProvisionedProductId):
+            acct = "999999999999" if ProvisionedProductId == "pp-1" else "123456789012"
+            return {"Outputs": [{"OutputKey": "AccountId", "OutputValue": acct}]}
+
+        sc.get_provisioned_product_outputs.side_effect = _outputs
+        sc.terminate_provisioned_product.return_value = {"RecordDetail": {"RecordId": "rec-9"}}
+
+        with patch(
+            "standstill.aws.account_factory._state.state.get_client",
+            side_effect=_dispatch({"servicecatalog": sc}),
+        ):
+            record_id = deregister_managed_account("123456789012")
+
+        assert record_id == "rec-9"
+        sc.terminate_provisioned_product.assert_called_once_with(ProvisionedProductId="pp-2")
+
+    def test_deregister_not_found_raises(self):
+        import pytest
+
+        from standstill.aws.account_factory import deregister_managed_account
+
+        sc = MagicMock()
+        sc.search_provisioned_products.return_value = {"ProvisionedProducts": []}
+        with patch(
+            "standstill.aws.account_factory._state.state.get_client",
+            side_effect=_dispatch({"servicecatalog": sc}),
+        ):
+            with pytest.raises(RuntimeError, match="No Account Factory provisioned product"):
+                deregister_managed_account("123456789012")
+
+    def test_poll_returns_normalized_on_success(self):
+        from standstill.aws.account_factory import poll_account_operation
+
+        sc = MagicMock()
+        sc.describe_record.return_value = {
+            "RecordDetail": {"Status": "SUCCEEDED", "RecordType": "PROVISION_PRODUCT"}
+        }
+        with patch("standstill.aws.account_factory.time.sleep"), patch(
+            "standstill.aws.account_factory._state.state.get_client",
+            side_effect=_dispatch({"servicecatalog": sc}),
+        ):
+            result = poll_account_operation("rec-1", timeout=30, poll_interval=0)
+
+        assert result["status"] == "SUCCEEDED"
+
+    def test_poll_failed_extracts_error_message(self):
+        from standstill.aws.account_factory import poll_account_operation
+
+        sc = MagicMock()
+        sc.describe_record.return_value = {
+            "RecordDetail": {
+                "Status": "FAILED",
+                "RecordErrors": [{"Code": "E", "Description": "email already in use"}],
+            }
+        }
+        with patch("standstill.aws.account_factory.time.sleep"), patch(
+            "standstill.aws.account_factory._state.state.get_client",
+            side_effect=_dispatch({"servicecatalog": sc}),
+        ):
+            result = poll_account_operation("rec-1", timeout=30, poll_interval=0)
+
+        assert result["status"] == "FAILED"
+        assert "email already in use" in result["statusMessage"]
+
+
+# ===========================================================================
 # accounts set-profile
 # ===========================================================================
 
